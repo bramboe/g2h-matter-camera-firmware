@@ -1,0 +1,9 @@
+# Never commit vendor-proprietary or device-derived binaries
+camera.bin
+app.tar.xz
+*secondary-baseline*.bin
+*.private.json
+__pycache__/
+*.pyc
+builds/
+journals/

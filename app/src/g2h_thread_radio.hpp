@@ -1,0 +1,111 @@
+#pragma once
+// Internal, read-only connection to the G2H's standalone Thread router.
+// No dataset/key requests, reset, GPIO operations, commissioning or flash access.
+#include <atomic>
+#include <cerrno>
+#ifdef G2H_RADIO_TRACE
+#include <cstdio>
+#endif
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <mutex>
+#include <thread>
+#include <poll.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+namespace g2h {
+struct RadioSnapshot {
+    bool valid=false;
+    std::string role,network,extAddress,extendedPanId;
+    unsigned channel=0,panId=0,rloc16=0;
+    std::chrono::steady_clock::time_point sampled{};
+    bool Fresh() const {return valid&&std::chrono::steady_clock::now()-sampled<std::chrono::seconds(90);}
+};
+class ThreadRadio {
+public:
+    explicit ThreadRadio(std::string uart="/dev/ttyS2",std::string lock="/tmp/g2h_thread_status.lock"):
+        uart_(std::move(uart)),lock_(std::move(lock)){}
+    ~ThreadRadio(){Stop();}
+    void Start(){if(worker_.joinable())return;stop_=false;worker_=std::thread([this]{
+        while(!stop_){PollOnce();for(unsigned i=0;i<300&&!stop_;++i)std::this_thread::sleep_for(std::chrono::milliseconds(100));}
+    });}
+    void Stop(){stop_=true;if(worker_.joinable())worker_.join();}
+    RadioSnapshot Snapshot() const {std::lock_guard<std::mutex> guard(mutex_);return snapshot_;}
+    bool PollOnce(){
+        // Shared maintenance lock convention: never steal an existing lock.
+        if(mkdir(lock_.c_str(),0700))return false;
+        struct Lock {std::string path;~Lock(){rmdir(path.c_str());}} lock{lock_};
+        int fd=open(uart_.c_str(),O_RDWR|O_NOCTTY|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);
+        if(fd<0){
+#ifdef G2H_RADIO_TRACE
+std::fprintf(stderr,"radio open errno=%d\n",errno);
+#endif
+return Invalidate();}
+        struct Serial {int fd;termios old{};bool saved=false;~Serial(){if(saved)tcsetattr(fd,TCSANOW,&old);close(fd);}} serial{fd};
+        if(tcgetattr(fd,&serial.old))return Invalidate();serial.saved=true;
+        termios raw=serial.old;cfmakeraw(&raw);raw.c_cflag|=CLOCAL|CREAD;raw.c_cflag&=~(HUPCL|CRTSCTS);raw.c_cc[VMIN]=0;raw.c_cc[VTIME]=0;
+        if(cfsetispeed(&raw,B115200)||cfsetospeed(&raw,B115200)||tcsetattr(fd,TCSANOW,&raw))return Invalidate();
+        // CLI responses can contain old asynchronous lines; correlate using the
+        // echoed read-only command and then require an exact Done terminator.
+        RadioSnapshot next;std::string value;
+        if(!Query(fd,"state",value)||!Role(value))return Invalidate();next.role=value;
+        if(!Query(fd,"channel",value)||!Number(value,10,26,next.channel)||next.channel<11)return Invalidate();
+        if(!Query(fd,"networkname",value)||value.empty()||value.size()>16)return Invalidate();next.network=value;
+        if(!Query(fd,"panid",value)||!Number(value,16,65535,next.panId))return Invalidate();
+        if(!Query(fd,"extpanid",value)||!Hex(value,16))return Invalidate();next.extendedPanId=value;
+        if(!Query(fd,"extaddr",value)||!Hex(value,16))return Invalidate();next.extAddress=value;
+        if(!Query(fd,"rloc16",value)||!Number(value,16,65535,next.rloc16))return Invalidate();
+        next.valid=true;next.sampled=std::chrono::steady_clock::now();
+        {std::lock_guard<std::mutex> guard(mutex_);snapshot_=std::move(next);}return true;
+    }
+    static bool Number(std::string text,unsigned base,unsigned maximum,unsigned &out){
+        if(base==16&&text.size()>2&&text.substr(0,2)=="0x")text.erase(0,2);
+        if(text.empty()||text.size()>8)return false;unsigned result=0;
+        for(char c:text){unsigned d=c>='0'&&c<='9'?unsigned(c-'0'):c>='a'&&c<='f'?unsigned(c-'a'+10):c>='A'&&c<='F'?unsigned(c-'A'+10):99;
+            if(d>=base||d>maximum||result>(maximum-d)/base)return false;result=result*base+d;}
+        out=result;return true;
+    }
+private:
+    bool Invalidate(){std::lock_guard<std::mutex> guard(mutex_);snapshot_.valid=false;return false;}
+    static bool Role(const std::string &s){return s=="disabled"||s=="detached"||s=="child"||s=="router"||s=="leader";}
+    static bool Hex(const std::string &s,size_t n){if(s.size()!=n)return false;for(char c:s)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))return false;return true;}
+    bool Query(int fd,const char *command,std::string &value){
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+        std::string request=std::string(command)+"\r\n",response;size_t sent=0;bool echoed=false;std::vector<std::string> lines;
+        while(!stop_&&std::chrono::steady_clock::now()<deadline){
+            pollfd p{fd,short(sent<request.size()?POLLOUT:POLLIN),0};int rc=poll(&p,1,100);
+            if(rc<0){if(errno==EINTR)continue;return false;}if(!rc)continue;
+            if(p.revents&(POLLERR|POLLHUP|POLLNVAL))return false;
+            if(sent<request.size()){
+                auto n=write(fd,request.data()+sent,request.size()-sent);if(n>0)sent+=size_t(n);else if(n<0&&errno!=EAGAIN&&errno!=EINTR)return false;continue;
+            }
+            char buf[256];auto n=read(fd,buf,sizeof(buf));if(n<0){if(errno==EAGAIN||errno==EINTR)continue;return false;}
+            if(!n)continue;
+#ifdef G2H_RADIO_TRACE
+std::fprintf(stderr,"radio %s: %.*s",command,int(n),buf);
+#endif
+response.append(buf,size_t(n));if(response.size()>4096)return false;
+            size_t end;
+            while((end=response.find('\n'))!=std::string::npos){
+                std::string line=response.substr(0,end);response.erase(0,end+1);
+                if(!line.empty()&&line.back()=='\r')line.pop_back();
+                while(line.rfind("> ",0)==0)line.erase(0,2);
+                std::string echo=line;while(!echo.empty()&&(echo.front()==' '||echo.front()=='>'||echo.front()=='\t'))echo.erase(0,1);
+                if(echo==command){echoed=true;lines.clear();continue;}
+                if(!echoed||line.empty()||line==">")continue;
+                if(line=="Done"){if(lines.size()!=1)return false;value=lines.front();return true;}
+                if(line.rfind("Error",0)==0)return false;lines.push_back(line);if(lines.size()>8)return false;
+            }
+        }return false;
+    }
+    std::string uart_,lock_;
+    mutable std::mutex mutex_;RadioSnapshot snapshot_;
+    std::atomic<bool> stop_{false};std::thread worker_;
+};
+}
