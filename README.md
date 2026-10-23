@@ -30,7 +30,8 @@ pipeline keep working.
 app/                 Our Matter camera application (binary + C++/headers source)
 install/             Python tooling to install the Matter app over the LAN (Telnet)
 firmware-patch/      HomeKit-disable patch (patch.bin) + ARM patch-helper + method doc
-docs/                Dutch install/pairing/reproduction notes (INSTALLATIE / KOPPELEN / …)
+docs/                Overview + install / pairing / reproduction notes (English)
+licenses/            Third-party licenses (FFmpeg LGPL v2.1, Opus BSD) + provenance
 ```
 
 Set your camera's LAN address once (scripts default to `192.168.1.50`):
@@ -42,8 +43,8 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
 ## Quickstart
 
 1. **Install the Matter app** (adds our service; does not touch the vendor app):
-   see [`docs/INSTALLATIE.md`](docs/INSTALLATIE.md) (network install) or
-   [`docs/REPRODUCTIE.md`](docs/REPRODUCTIE.md) (the camera's own `app.bin` boot
+   see [`docs/INSTALL.md`](docs/INSTALL.md) (network install) or
+   [`docs/REPRODUCE.md`](docs/REPRODUCE.md) (the camera's own `app.bin` boot
    path). Provide a per‑device Matter identity and the `enabled` flag as described.
 
 2. **Disable the vendor HomeKit (optional, permanent):** see
@@ -53,7 +54,7 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
    build via the camera's native `hexdump` patch technique, behind a cold‑boot
    guardian that auto‑reverts on failure.
 
-3. **Pair over Matter:** see [`docs/KOPPELEN.md`](docs/KOPPELEN.md).
+3. **Pair over Matter:** see [`docs/PAIRING.md`](docs/PAIRING.md).
 
 ## Status / limitations
 
