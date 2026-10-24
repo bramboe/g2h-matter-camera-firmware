@@ -1,86 +1,91 @@
-# Permanently disable the vendor HomeKit (HAP) at boot
+# Disable the vendor HomeKit at boot (verified method)
 
-This disables the Aqara G2H's built‑in HomeKit AccessoryServer with a **minimal,
-size‑preserving binary patch** — three Thumb `CBZ r0` instructions replaced with
-`NOP` (`0xBF00`) — that forces the vendor's own *"AccessoryServer will not start"*
-code path. RTSP and the Matter pipeline are untouched.
+This makes the Aqara G2H no longer discoverable as a HomeKit accessory, so it
+disappears from Home Assistant / Apple Home and can no longer be paired over
+HomeKit. It is a **minimal, size‑preserving one‑byte patch** to the vendor
+camera binary, applied at boot. RTSP and the Matter pipeline are untouched.
 
 **You apply this to the camera binary already on your own device.** No vendor
 binary is distributed here.
 
-## How the G2H builds its running camera at boot
+## What actually works — and what didn't
 
-`/etc/tar_app.sh` (run from `S90app` at every boot):
+HomeKit controllers discover accessories purely via the **mDNS service type
+`_hap._tcp`**. The reliable disable is to **corrupt that service‑type string** in
+the camera binary so the camera advertises an unrecognized type (`_xap._tcp`):
+every HomeKit controller browses for `_hap._tcp`, so it simply never sees the
+device. Verified on a live G2H — after the patch an mDNS browse shows **no
+`_hap` advert** for the camera (only the inert `_xap`), and the HA card clears.
 
-1. extracts `/local/app.tar.xz` → `/tmp/out` (tmpfs, volatile),
-2. rewrites hard‑coded cloud IPs to loopback and swaps `miio_task`→`rtsp_task`
-   with a **`hexdump -vC | sed | hexdump -R`** round‑trip (size‑checked), and
-3. calls a secondary‑encoder `boot` that adds the Constrained‑Baseline 720p
-   encoder the Matter/WebRTC path needs, producing the final `/tmp/out/camera`.
+> Honest note: an earlier attempt to force the vendor's "AccessoryServer will not
+> start" path by NOP‑ing three `CBZ` gate instructions did **not** work — those
+> gates were not the control point, and `homekit_task` kept running and
+> advertising. The `sys.hap_disable` / `persist.sys.hap_disable` property had no
+> effect either. The service‑type‑string patch below is the method that was
+> actually verified to remove the advertisement.
 
-Because `/tmp/out` is rebuilt every boot, the persistent change lives in the boot
-scripts under `/customer`, not in `/tmp`.
+The HAP server process still runs internally (its port stays open), but with no
+`_hap` advertisement it is undiscoverable and unpairable — effectively disabled.
 
 ## The patch
 
-Three gate call sites (`bl <hap_disable_check>; cbz r0,<start>`) in the 4.5 MB
-vendor camera binary (the state at `/tmp/out/camera` just after step 2 above,
-md5 `63a5b004…`). File offsets and the exact `hexdump -vC` lines (each is a
-**unique** 16‑byte‑aligned line, safe to `sed`):
-
-| site | file offset | old (CBZ) | new (NOP) |
-|------|-------------|-----------|-----------|
-| A | `0x1d14be` | `… 05 46 d8 b1` | `… 05 46 00 bf` |
-| B | `0x1d1658` | `24 f0 08 f9  c0 b1 …` | `24 f0 08 f9  00 bf …` |
-| C | `0x1d4610` | `f8 b1 02 f0 …` | `00 bf 02 f0 …` |
-
-`sed` substitutions for the `hexdump -vC` round‑trip (full lines):
+In the 4.5 MB vendor camera (the state at `/tmp/out/camera` just after
+`tar_app.sh`'s own patches, md5 `63a5b004…`), the null‑terminated service‑type
+string `_hap._tcp` that is loaded into the mDNS register call lives at **file
+offset `0x3c0a91`**. Change the `h` (`0x3c0a92`, `0x68`) to `x` (`0x78`):
 
 ```
-s/25 f0 c0 ff 05 f0 82 fa  24 f0 d6 f9 05 46 d8 b1/25 f0 c0 ff 05 f0 82 fa  24 f0 d6 f9 05 46 00 bf/
-s/05 f0 b4 f9 24 f0 08 f9  c0 b1 05 f0 95 f9 01 21/05 f0 b4 f9 24 f0 08 f9  00 bf 05 f0 95 f9 01 21/
-s/f8 b1 02 f0 b9 f9 42 46  3b 46 01 21 22 f0 fe fd/00 bf 02 f0 b9 f9 42 46  3b 46 01 21 22 f0 fe fd/
+_hap._tcp  ->  _xap._tcp
 ```
 
-Patching the 4.5 MB input with these NOPs yields md5 `dde1f2ec…`. Running the
-unchanged secondary‑encoder patch (`patch.bin`, applied by `patch-helper`) on top
-yields the final 16.8 MB binary md5 `30ca67f7…` — the NOP offsets and the
-encoder‑patch offsets don't overlap, so the two operations commute.
+`hexdump -vC | sed | hexdump -R` substitution (the vendor's own technique; the
+target line is unique in the file, byte 2 of the 16‑byte line):
+
+```
+s/00 5f 68 61 70 2e 5f 74  63 70 00 52 65 67 69 73/00 5f 78 61 70 2e 5f 74  63 70 00 52 65 67 69 73/
+```
+
+Hash chain (reference): vendor input `63a5b004…` → after the one‑byte change
+`04c86ff9…` → after the secondary‑encoder patch (`patch.bin`, applied by
+`patch-helper`) `5974b4be…` — the final 16.8 MB binary installed at
+`/tmp/out/camera`. The string offset and the encoder‑patch offsets don't overlap,
+so the two operations commute.
 
 ## Files here
 
-- `patch.bin` — the secondary‑encoder patch (`G2HBLP01` format: our offline‑built
-  PHDR+stub; contains no vendor `.text`).
-- `patch-helper` — static ARM applier for `patch.bin` (`helper <src> <patch.bin>
-  <out>`; it only operates on `/tmp/out/camera` and a `/tmp/g2h_vendor_baseline_*`
-  output path).
+- `patch.bin` / `patch-helper` — the secondary‑encoder patch and its ARM applier
+  (needed for the Matter/WebRTC 720p encoder; see `../docs/OVERVIEW.md`). The
+  HomeKit disable is the string change above, applied to the input *before* this.
 
 ## Install (at a full cold boot — never by killing the running camera)
 
-The safe, reversible method: install a one‑shot boot hook that
+Install a one‑shot boot hook that
 
-1. restores the original `/etc/tar_app.sh` first (so a second boot is always
-   clean), then arms a **guardian** that reboots back to the known‑good boot
-   within ~300 s unless the new boot is committed;
+1. restores the original `/etc/tar_app.sh` first, then arms a **guardian** that
+   reboots back to the known‑good boot within ~300 s unless the new boot is
+   committed;
 2. verifies `/tmp/out/camera` is the expected input (`63a5b004…`);
-3. applies the three NOPs with the `hexdump`/`sed`/`hexdump` round‑trip above,
-   checking size (`4546596`) and md5 (`dde1f2ec…`), restoring on any mismatch;
-4. runs `patch-helper` with the unchanged `patch.bin` → verifies md5 `30ca67f7…`;
+3. applies the `_hap`→`_xap` change with the `hexdump`/`sed`/`hexdump`
+   round‑trip above, checking size (`4546596`) and md5 (`04c86ff9…`), restoring
+   on any mismatch;
+4. runs `patch-helper` with the unchanged `patch.bin` → verifies md5 `5974b4be…`;
 5. installs it as `/tmp/out/camera`.
 
-Reboot once. Verify: both RTSP streams up (Main 1080p + Baseline 720p), Matter
-ready, HomeKit gone. Only then write the `committed` flag so the guardian stops
-reverting. Keep the original `/etc/tar_app.sh` backup for rollback.
+Reboot once. **Verify with an mDNS browse** that `_hap._tcp` is no longer
+advertised for the camera (e.g. `dns-sd -B _hap._tcp local.`). Only then commit
+so the guardian stops reverting. Keep the original `/etc/tar_app.sh` (and the
+previous boot script) backed up for rollback.
 
-### Rollback
+## Rollback
 
-Restore the original `/etc/tar_app.sh`, `sync`, reboot. The camera re‑extracts
-the pristine binary from `/local/app.tar.xz` (never modified) and HomeKit returns.
+Restore the original `/etc/tar_app.sh` (and the previous boot script), `sync`,
+reboot. The camera re‑extracts the pristine binary from `/local/app.tar.xz`
+(never modified) and HomeKit returns.
 
 ## Notes
 
-- Repeated short RTSP connections can momentarily lock the vendor RTSP server; a
-  reboot clears it. Commit the install based on the stream/decode/Matter checks,
-  not on an RTSP‑reopen stress test.
+- Verify by behaviour (mDNS browse / the HA card), not by a thread‑name grep — a
+  running HAP thread can momentarily disappear during boot and read as "off".
 - Do not kill the running vendor camera to swap the binary — apply only during a
-  full boot, before the camera process starts.
+  full boot, before the camera process starts (the video hardware does not
+  re‑initialise reliably otherwise).

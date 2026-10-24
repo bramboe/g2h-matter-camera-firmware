@@ -47,12 +47,14 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
    [`docs/REPRODUCE.md`](docs/REPRODUCE.md) (the camera's own `app.bin` boot
    path). Provide a per‑device Matter identity and the `enabled` flag as described.
 
-2. **Disable the vendor HomeKit (optional, permanent):** see
-   [`firmware-patch/HOMEKIT-DISABLE.md`](firmware-patch/HOMEKIT-DISABLE.md). This
-   applies three size‑preserving instruction patches (`CBZ → NOP`) that force the
-   vendor's own "AccessoryServer will not start" path, folded into the boot‑time
-   build via the camera's native `hexdump` patch technique, behind a cold‑boot
-   guardian that auto‑reverts on failure.
+2. **Disable the vendor HomeKit (optional):** see
+   [`firmware-patch/HOMEKIT-DISABLE.md`](firmware-patch/HOMEKIT-DISABLE.md). A
+   size‑preserving one‑byte change to the camera's `_hap._tcp` mDNS service‑type
+   string (`_hap`→`_xap`) makes the camera unrecognizable to HomeKit controllers,
+   so it disappears from HA / Apple Home and can't be paired. Applied in the
+   boot‑time build via the camera's native `hexdump` patch technique, behind a
+   cold‑boot guardian that auto‑reverts on failure. Verified live (no `_hap`
+   advert after the patch).
 
 3. **Pair over Matter:** see [`docs/PAIRING.md`](docs/PAIRING.md).
 
@@ -60,7 +62,9 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
 
 - Verified on a live G2H: Matter video (40 frames over the SDK WebRTC provider),
   snapshots, microphone, talkback and privacy; RTSP Main 1080p + Constrained
-  Baseline 720p preserved; Thread router; HomeKit permanently off.
+  Baseline 720p preserved; Thread router; HomeKit discovery disabled (no `_hap`
+  advertisement — undiscoverable/unpairable; the HAP process still runs but is
+  invisible).
 - **Home Assistant** renders Matter cameras only from **HA 2026.11** with Matter
   server schema 14. On earlier HA the device pairs but shows no camera entity yet.
 - Hardware constraint: the camera binary may only be swapped **during a full boot**,
