@@ -23,7 +23,8 @@ a certified product.
 
 ## What does not work (yet) / is missing
 
-- **Display in Home Assistant** — HA renders Matter cameras only from HA 2026.11
+- **Display in Home Assistant** — moving video was confirmed with the project extension on HA 2026.10.2;
+  native camera UI support needs separate qualification
   with a Matter server of schema 14. After that the camera appears automatically
   in the existing Matter device; no re-pairing needed.
 - **Image mirror/rotate** — no safe live setting; only a config key that requires

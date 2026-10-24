@@ -3,9 +3,8 @@
 Custom firmware work for the **Aqara Camera Hub G2H** that turns it into an
 **all‑Matter camera** — video (WebRTC), snapshots, microphone, talkback, camera
 controls and privacy over a single Matter pairing, with the on‑board JN5189 as an
-internal Thread router. It also includes a **permanent disable of the vendor
-HomeKit (HAP) AccessoryServer**, applied at boot, while RTSP and the Matter
-pipeline keep working.
+internal Thread router. It also includes optional **suppression of vendor HomeKit discovery**, applied at
+boot. The HAP server itself still runs; RTSP and the Matter pipeline remain available.
 
 > **No vendor firmware is redistributed here.** This repo ships *our* Matter app,
 > *our* install tooling, and a *patch* that you apply to the camera binary that is
@@ -34,10 +33,10 @@ docs/                Overview + install / pairing / reproduction notes (English)
 licenses/            Third-party licenses (FFmpeg LGPL v2.1, Opus BSD) + provenance
 ```
 
-Set your camera's LAN address once (scripts default to `192.168.1.50`):
+Set your camera's actual LAN address (no address is assumed):
 
 ```bash
-export CAMERA_IP=192.168.1.50   # your camera's IP
+export G2H_IP=192.168.1.123   # your camera's IP
 ```
 
 ## Quickstart
@@ -50,8 +49,8 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
 2. **Disable the vendor HomeKit (optional):** see
    [`firmware-patch/HOMEKIT-DISABLE.md`](firmware-patch/HOMEKIT-DISABLE.md). A
    size‑preserving one‑byte change to the camera's `_hap._tcp` mDNS service‑type
-   string (`_hap`→`_xap`) makes the camera unrecognizable to HomeKit controllers,
-   so it disappears from HA / Apple Home and can't be paired. Applied in the
+   string (`_hap`→`_xap`) suppresses normal HomeKit discovery. The HAP server and existing
+   connections/pairings are not disabled by that string change. Applied in the
    boot‑time build via the camera's native `hexdump` patch technique, behind a
    cold‑boot guardian that auto‑reverts on failure. Verified live (no `_hap`
    advert after the patch).
@@ -63,13 +62,29 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
 - Verified on a live G2H: Matter video (40 frames over the SDK WebRTC provider),
   snapshots, microphone, talkback and privacy; RTSP Main 1080p + Constrained
   Baseline 720p preserved; Thread router; HomeKit discovery disabled (no `_hap`
-  advertisement — undiscoverable/unpairable; the HAP process still runs but is
-  invisible).
-- **Home Assistant** renders Matter cameras only from **HA 2026.11** with Matter
-  server schema 14. On earlier HA the device pairs but shows no camera entity yet.
+  advertisement; the HAP process still runs, and existing connections are
+  not blocked).
+- **Home Assistant:** moving video was confirmed on HA 2026.10.2 with Matter
+  server schema 13 through the project custom integration. Native camera UI
+  support and other versions need separate qualification; see
+  [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 - Hardware constraint: the camera binary may only be swapped **during a full boot**,
   never by killing the running camera process (the video hardware does not
   re‑initialise reliably otherwise). The tooling here follows that rule.
+
+## New source candidates
+
+Independent media-session ownership, richer Thread diagnostics, bounded 640×360
+snapshots, queued-audio mute fixes, and guarded slot updates are described in
+[IMPROVEMENTS.md](docs/IMPROVEMENTS.md). These source changes require hardware
+qualification; the historical prebuilt executable remains identified separately.
+
+## Source builds and release evidence
+
+See [`docs/BUILD.md`](docs/BUILD.md) for pinned inputs, portable build stages,
+offline checks and corresponding-source/relinking bundles. Historical packaged
+binaries and new source candidates are identified separately; offline tests do
+not qualify a new build for installation.
 
 ## License
 

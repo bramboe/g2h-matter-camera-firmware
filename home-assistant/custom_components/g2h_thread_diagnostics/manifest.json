@@ -1,0 +1,1 @@
+{"domain":"g2h_thread_diagnostics","name":"G2H Thread diagnostics","version":"0.1.0","config_flow":true,"dependencies":["matter"],"documentation":"https://github.com/bramboe/g2h-matter-camera-firmware/blob/main/docs/THREAD.md","codeowners":[],"iot_class":"local_polling"}

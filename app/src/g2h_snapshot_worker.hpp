@@ -1,5 +1,7 @@
 #pragma once
+#include "g2h_snapshot_dimensions.hpp"
 #include <pthread.h>
+#include <stdexcept>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -16,10 +18,16 @@ public:
     using SteadyClock=std::chrono::steady_clock;
     // Latest IDR access unit and the time it was received; false when none is fresh.
     using Source=std::function<bool(std::vector<std::uint8_t>&,SteadyClock::time_point&)>;
+    using SizedEncode=std::function<std::vector<std::uint8_t>(const std::vector<std::uint8_t>&,unsigned,unsigned,unsigned)>;
     using Encode=std::function<std::vector<std::uint8_t>(const std::vector<std::uint8_t>&,unsigned)>;
-    SnapshotWorker(Source source,Encode encode,std::chrono::milliseconds maxAge=std::chrono::seconds(3),
+    SnapshotWorker(Source source,SizedEncode encode,std::chrono::milliseconds maxAge=std::chrono::seconds(3),
                    std::chrono::milliseconds requestBudget=std::chrono::milliseconds(2500))
         :source_(std::move(source)),encode_(std::move(encode)),maxAge_(maxAge),budget_(requestBudget){}
+    SnapshotWorker(Source source,Encode encode,std::chrono::milliseconds maxAge=std::chrono::seconds(3),
+                   std::chrono::milliseconds requestBudget=std::chrono::milliseconds(2500))
+        :SnapshotWorker(std::move(source),SizedEncode([encode=std::move(encode)](const std::vector<std::uint8_t>&idr,unsigned q,unsigned w,unsigned h){
+            if(w!=320||h!=180)throw std::invalid_argument("legacy snapshot size");return encode(idr,q);
+        }),maxAge,requestBudget){}
     ~SnapshotWorker(){Stop();}
     SnapshotWorker(const SnapshotWorker&)=delete;
     SnapshotWorker& operator=(const SnapshotWorker&)=delete;
@@ -35,59 +43,64 @@ public:
     void Stop() noexcept {
         {std::lock_guard<std::mutex> lock(mutex_);if(!started_)return;stop_=true;}
         cv_.notify_all();pthread_join(thread_,nullptr);
-        std::lock_guard<std::mutex> lock(mutex_);started_=false;pending_=false;jpeg_.clear();
+        std::lock_guard<std::mutex> lock(mutex_);started_=false;pending_=false;jpeg_.clear();failedAt_={};
     }
     // Non-blocking: begin preparing a JPEG at this quality.
-    void Request(unsigned quality){std::lock_guard<std::mutex> lock(mutex_);if(started_&&!stop_)RequestLocked(quality);}
-    bool Get(unsigned quality,std::chrono::milliseconds wait,std::vector<std::uint8_t>&out){
+    void Request(unsigned quality,unsigned width=320,unsigned height=180){if(!Valid(quality,width,height))return;std::lock_guard<std::mutex> lock(mutex_);if(started_&&!stop_)RequestLocked(quality,width,height);}
+    bool Get(unsigned quality,std::chrono::milliseconds wait,std::vector<std::uint8_t>&out,unsigned width=320,unsigned height=180){
+        if(!Valid(quality,width,height))return false;
         std::unique_lock<std::mutex> lock(mutex_);
         if(!started_||stop_)return false;
-        if(!FreshLocked(quality)){
-            RequestLocked(quality);
-            cv_.wait_for(lock,wait,[&]{return stop_||FreshLocked(quality);});
-            if(stop_||!FreshLocked(quality))return false;
+        if(!FreshLocked(quality,width,height)){
+            RequestLocked(quality,width,height);
+            cv_.wait_for(lock,wait,[&]{return stop_||FreshLocked(quality,width,height);});
+            if(stop_||!FreshLocked(quality,width,height))return false;
         }
         out=jpeg_;return true;
     }
     unsigned Encodes() const {std::lock_guard<std::mutex> lock(mutex_);return encodes_;}
 private:
     static void *Entry(void *self){try{static_cast<SnapshotWorker*>(self)->Run();}catch(...){}return nullptr;}
-    bool FreshLocked(unsigned quality) const {
-        return !jpeg_.empty()&&quality_==quality&&SteadyClock::now()-idrAt_<=maxAge_;
+    static bool Valid(unsigned q,unsigned w,unsigned h){return q>=1&&q<=100&&SnapshotDimensions(w,h);}
+    bool FreshLocked(unsigned quality,unsigned width,unsigned height) const {
+        return !jpeg_.empty()&&quality_==quality&&width_==width&&height_==height&&SteadyClock::now()-idrAt_<=maxAge_;
     }
-    void RequestLocked(unsigned quality){
+    void RequestLocked(unsigned quality,unsigned width,unsigned height){
         const auto until=SteadyClock::now()+budget_;
-        if(!pending_||wantQuality_!=quality||until>requestUntil_)requestUntil_=until;
-        wantQuality_=quality;pending_=true;cv_.notify_all();
+        if(!pending_||wantQuality_!=quality||wantWidth_!=width||wantHeight_!=height||until>requestUntil_)requestUntil_=until;
+        wantQuality_=quality;wantWidth_=width;wantHeight_=height;pending_=true;cv_.notify_all();
     }
     void Run(){
         std::unique_lock<std::mutex> lock(mutex_);
         while(!stop_){
             cv_.wait(lock,[&]{return stop_||pending_;});
             if(stop_)break;
-            const unsigned quality=wantQuality_;
-            if(FreshLocked(quality)||SteadyClock::now()>=requestUntil_){pending_=false;cv_.notify_all();continue;}
-            const auto failedAt=failedAt_;
+            const unsigned quality=wantQuality_,width=wantWidth_,height=wantHeight_;
+            if(FreshLocked(quality,width,height)||SteadyClock::now()>=requestUntil_){pending_=false;cv_.notify_all();continue;}
+            const auto failedAt=(failedQuality_==quality&&failedWidth_==width&&failedHeight_==height)?failedAt_:SteadyClock::time_point{};
             lock.unlock();
             std::vector<std::uint8_t> idr,jpeg;SteadyClock::time_point at{};bool have=false,failed=false;
-            try{have=source_(idr,at)&&!idr.empty()&&at!=failedAt;}catch(...){have=false;}
-            if(have){try{jpeg=encode_(idr,quality);}catch(...){failed=true;}if(jpeg.empty())failed=true;}
+            try{have=source_(idr,at)&&!idr.empty()&&idr.size()<=1024*1024&&at!=failedAt;
+                const auto now=SteadyClock::now();have=have&&at<=now&&now-at<=maxAge_;
+            }catch(...){have=false;}
+            if(have){try{jpeg=encode_(idr,quality,width,height);}catch(...){failed=true;}if(jpeg.empty()||jpeg.size()>64000)failed=true;}
             lock.lock();
             if(have)++encodes_;
-            if(have&&!failed){jpeg_=std::move(jpeg);quality_=quality;idrAt_=at;cv_.notify_all();}
-            else if(have)failedAt_=at; // Never retry the same undecodable IDR.
+            if(have&&!failed){jpeg_=std::move(jpeg);quality_=quality;width_=width;height_=height;idrAt_=at;cv_.notify_all();}
+            else if(have){failedAt_=at;failedQuality_=quality;failedWidth_=width;failedHeight_=height;} // Never retry the same undecodable IDR.
             // No usable fresh IDR yet: poll briefly until the request budget ends.
-            if(!FreshLocked(wantQuality_))cv_.wait_for(lock,std::chrono::milliseconds(20),[&]{return stop_;});
+            if(!FreshLocked(wantQuality_,wantWidth_,wantHeight_))cv_.wait_for(lock,std::chrono::milliseconds(20),[&]{return stop_;});
         }
     }
     Source source_;
-    Encode encode_;
+    SizedEncode encode_;
     const std::chrono::milliseconds maxAge_,budget_;
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     pthread_t thread_{};
     bool started_=false,stop_=false,pending_=false;
-    unsigned wantQuality_=0,quality_=0,encodes_=0;
+    unsigned wantQuality_=0,quality_=0,encodes_=0,wantWidth_=320,wantHeight_=180,width_=0,height_=0;
+    unsigned failedQuality_=0,failedWidth_=0,failedHeight_=0;
     SteadyClock::time_point requestUntil_{},idrAt_{},failedAt_{};
     std::vector<std::uint8_t> jpeg_;
 };

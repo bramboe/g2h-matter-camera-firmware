@@ -1,6 +1,7 @@
 #pragma once
 // Internal, read-only connection to the G2H's standalone Thread router.
 // No dataset/key requests, reset, GPIO operations, commissioning or flash access.
+#include "g2h_thread_telemetry.hpp"
 #include <atomic>
 #include <cerrno>
 #ifdef G2H_RADIO_TRACE
@@ -24,6 +25,7 @@ struct RadioSnapshot {
     bool valid=false;
     std::string role,network,extAddress,extendedPanId;
     unsigned channel=0,panId=0,rloc16=0;
+    RadioDataset neighbors,children,routers; RadioCounters counters;
     std::chrono::steady_clock::time_point sampled{};
     bool Fresh() const {return valid&&std::chrono::steady_clock::now()-sampled<std::chrono::seconds(90);}
 };
@@ -61,12 +63,20 @@ return Invalidate();}
         if(!Query(fd,"extpanid",value)||!Hex(value,16))return Invalidate();next.extendedPanId=value;
         if(!Query(fd,"extaddr",value)||!Hex(value,16))return Invalidate();next.extAddress=value;
         if(!Query(fd,"rloc16",value)||!Number(value,16,65535,next.rloc16))return Invalidate();
+        // Optional read-only commands. Unsupported/malformed output invalidates only
+        // its own dataset, never the identity/role sample or another table.
+        std::vector<std::string> rows;
+        if(QueryLines(fd,"neighbor table",rows))ParseRadioTable(rows,"neighbor",next.neighbors);
+        if(QueryLines(fd,"child table",rows))ParseRadioTable(rows,"child",next.children);
+        if(QueryLines(fd,"router table",rows))ParseRadioTable(rows,"router",next.routers);
+        std::vector<std::string> counters;
+        if(QueryLines(fd,"counters mac",counters)&&Query(fd,"uptime ms",value))ParseRadioCounters(counters,value,next.counters);
         next.valid=true;next.sampled=std::chrono::steady_clock::now();
         {std::lock_guard<std::mutex> guard(mutex_);snapshot_=std::move(next);}return true;
     }
     static bool Number(std::string text,unsigned base,unsigned maximum,unsigned &out){
         if(base==16&&text.size()>2&&text.substr(0,2)=="0x")text.erase(0,2);
-        if(text.empty()||text.size()>8)return false;unsigned result=0;
+        if(text.empty()||text.size()>10)return false;unsigned result=0;
         for(char c:text){unsigned d=c>='0'&&c<='9'?unsigned(c-'0'):c>='a'&&c<='f'?unsigned(c-'a'+10):c>='A'&&c<='F'?unsigned(c-'A'+10):99;
             if(d>=base||d>maximum||result>(maximum-d)/base)return false;result=result*base+d;}
         out=result;return true;
@@ -76,8 +86,11 @@ private:
     static bool Role(const std::string &s){return s=="disabled"||s=="detached"||s=="child"||s=="router"||s=="leader";}
     static bool Hex(const std::string &s,size_t n){if(s.size()!=n)return false;for(char c:s)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))return false;return true;}
     bool Query(int fd,const char *command,std::string &value){
+        std::vector<std::string> lines;if(!QueryLines(fd,command,lines)||lines.size()!=1)return false;value=lines.front();return true;
+    }
+    bool QueryLines(int fd,const char *command,std::vector<std::string> &value){
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
-        std::string request=std::string(command)+"\r\n",response;size_t sent=0;bool echoed=false;std::vector<std::string> lines;
+        std::string request=std::string(command)+"\r\n",response;size_t sent=0,total=0;bool echoed=false;std::vector<std::string> lines;
         while(!stop_&&std::chrono::steady_clock::now()<deadline){
             pollfd p{fd,short(sent<request.size()?POLLOUT:POLLIN),0};int rc=poll(&p,1,100);
             if(rc<0){if(errno==EINTR)continue;return false;}if(!rc)continue;
@@ -90,7 +103,7 @@ private:
 #ifdef G2H_RADIO_TRACE
 std::fprintf(stderr,"radio %s: %.*s",command,int(n),buf);
 #endif
-response.append(buf,size_t(n));if(response.size()>4096)return false;
+total+=size_t(n);if(total>16384)return false;response.append(buf,size_t(n));if(response.size()>1024)return false;
             size_t end;
             while((end=response.find('\n'))!=std::string::npos){
                 std::string line=response.substr(0,end);response.erase(0,end+1);
@@ -99,8 +112,8 @@ response.append(buf,size_t(n));if(response.size()>4096)return false;
                 std::string echo=line;while(!echo.empty()&&(echo.front()==' '||echo.front()=='>'||echo.front()=='\t'))echo.erase(0,1);
                 if(echo==command){echoed=true;lines.clear();continue;}
                 if(!echoed||line.empty()||line==">")continue;
-                if(line=="Done"){if(lines.size()!=1)return false;value=lines.front();return true;}
-                if(line.rfind("Error",0)==0)return false;lines.push_back(line);if(lines.size()>8)return false;
+                if(line=="Done"){value=std::move(lines);return true;}
+                if(line.rfind("Error",0)==0)return false;lines.push_back(line);if(lines.size()>66)return false;
             }
         }return false;
     }

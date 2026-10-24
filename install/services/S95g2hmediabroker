@@ -1,0 +1,36 @@
+#!/bin/sh
+# Deliberately independent of Matter app stop/restart. Never stop the vendor.
+app=/customer/g2h-matter-camera/g2h-media-broker
+dir=/tmp/g2h-media-broker
+pidfile=/tmp/g2h-media-broker.pid
+running() {
+    [ -r "$pidfile" ] || return 1
+    read pid birth < "$pidfile"
+    case "$pid:$birth" in *[!0-9:]*|:*) return 1;; esac
+    [ "$(readlink "/proc/$pid/exe" 2>/dev/null)" = "$app" ] &&
+    [ "$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)" = "$birth" ]
+}
+case "$1" in
+status) running && [ -S "$dir/video.sock" ] && [ -S "$dir/audio.sock" ]; exit $?;;
+''|start) ;;
+*) echo 'Only start/status: native sessions must survive Matter updates.'; exit 2;;
+esac
+[ -f /mnt/config/g2h-matter-camera/media-broker-enabled ] || exit 0
+running && exit 0
+[ -x "$app" ] || exit 1
+umask 077
+mkdir /tmp/g2h-media-broker-start.lock 2>/dev/null || exit 1
+trap 'rmdir /tmp/g2h-media-broker-start.lock 2>/dev/null' EXIT
+running && exit 0
+(
+    trap '' HUP
+    exec "$app" --serve "$dir" </dev/null >/dev/null 2>&1
+) &
+pid=$!
+birth=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)
+printf '%s %s\n' "$pid" "$birth" > "$pidfile"
+for i in 1 2 3 4 5; do
+    if running && [ -S "$dir/video.sock" ] && [ -S "$dir/audio.sock" ]; then exit 0; fi
+    sleep 1
+done
+exit 1

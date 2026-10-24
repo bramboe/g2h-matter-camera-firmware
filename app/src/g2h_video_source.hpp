@@ -1,5 +1,5 @@
 #pragma once
-#include "g2h_rtsp_source.hpp"
+#include "g2h_media_input.hpp"
 #include "h264_geometry.hpp"
 #include <atomic>
 #include <deque>
@@ -24,7 +24,7 @@ public:
         if(fault_&&Clock::now()-failedAt_.load()<std::chrono::seconds(15))return false;
         Stop();fault_=false;stop_=false;streaming_=false;
         try{
-            auto source=std::make_unique<Rtsp>("127.0.0.1",std::chrono::milliseconds(2000));source->Start();
+            auto source=std::make_unique<MediaInput>(false);source->Start();
             if(!IsSupported720pSps(source->parameters.sps)){fault_=true;stop_=true;failedAt_=Clock::now();return false;}
             {std::lock_guard<std::mutex> lock(mutex_);profile_=source->parameters.ProfileLevel();}
             worker_=std::thread([this,source=std::move(source)]()mutable{Run(*source);});
@@ -53,7 +53,7 @@ public:
     bool Faulted()const{return fault_;}
     std::string Profile(){std::lock_guard<std::mutex> lock(mutex_);return profile_;}
 private:
-    void Run(Rtsp &source) noexcept {
+    void Run(MediaInput &source) noexcept {
         try{
             H264Rtp parser;H264Rtp::Frame frame;std::vector<std::uint8_t> packet;
             bool awaitIdr=true;std::uint64_t generation=generation_;

@@ -1,5 +1,6 @@
 #pragma once
 #include <app/clusters/camera-av-stream-management-server/CameraAVStreamManagementCluster.h>
+#include "g2h_snapshot_dimensions.hpp"
 #include <functional>
 #include <limits>
 
@@ -14,9 +15,9 @@ public:
     struct Format { std::uint16_t width, height, fps; };
     using Start = std::function<bool()>;
     using Stop = std::function<void()>;
-    using Capture = std::function<Status(unsigned,av::ImageSnapshot&)>;
+    using Capture = std::function<Status(unsigned,unsigned,unsigned,av::ImageSnapshot&)>;
     // Optional, non-blocking: start preparing a snapshot at this quality.
-    using Prepare = std::function<void(unsigned)>;
+    using Prepare = std::function<void(unsigned,unsigned,unsigned)>;
     // Optional: start (idempotently) the audio ingest at this Opus bit rate.
     using AudioStart = std::function<bool(unsigned)>;
     static constexpr std::uint16_t kAudioStreamId=3;
@@ -81,13 +82,14 @@ public:
         if(!capture_)return Status::UnsupportedCommand;
         if(!Enabled())return Status::InvalidInState;
         if(r.imageCodec!=av::ImageCodecEnum::kJpeg||r.maxFrameRate!=1||!r.quality||r.quality>100||
-           !r.minResolution.width||!r.minResolution.height||r.minResolution.width>320||r.minResolution.height>180||
-           r.maxResolution.width<320||r.maxResolution.height<180||r.encodedPixels||
+           (!SnapshotFits(320,180,r.minResolution.width,r.minResolution.height,r.maxResolution.width,r.maxResolution.height)&&
+            !SnapshotFits(640,360,r.minResolution.width,r.minResolution.height,r.maxResolution.width,r.maxResolution.height))||r.encodedPixels||r.hardwareEncoder||
            r.watermarkEnabled.HasValue())return Status::DynamicConstraintError; // OSD comes from the shared encoder
         bool ready=false;try{ready=start_&&start_();}catch(...){}
         if(!ready)return Status::Failure;
-        snapshotQuality_=r.quality;snapshotAllocated_=true;id=2;
-        if(prepare_){try{prepare_(r.quality);}catch(...){}}
+        snapshotQuality_=r.quality;snapshotMin_=r.minResolution;snapshotMax_=r.maxResolution;snapshotAllocated_=true;id=2;
+        const bool large=SnapshotFits(640,360,snapshotMin_.width,snapshotMin_.height,snapshotMax_.width,snapshotMax_.height);
+        if(prepare_){try{prepare_(r.quality,large?640:320,large?360:180);}catch(...){}}
         return Status::Success;
     }
     Status SnapshotStreamModify(std::uint16_t id,chip::Optional<bool> watermark,chip::Optional<bool> osd) override {
@@ -102,13 +104,14 @@ public:
         if(!capture_)return Status::UnsupportedCommand;
         if(!Enabled())return Status::InvalidInState;
         if(!SnapshotAllocated(id.IsNull()?2:id.Value()))return Status::NotFound;
-        // RequestedResolution is a preference; the response states the real 320x180.
-        (void)resolution;
-        unsigned quality=snapshotQuality_;
+        // Serve only an explicitly supported size inside this allocation.
+        // Never return a differently sized JPEG while claiming the requested size.
+        unsigned quality=snapshotQuality_;auto minimum=snapshotMin_,maximum=snapshotMax_;
         if(auto *cluster=GetCameraAVStreamManagementCluster()){
-            for(const auto &stream:cluster->GetAllocatedSnapshotStreams())if(stream.snapshotStreamID==2)quality=stream.quality;
+            for(const auto &stream:cluster->GetAllocatedSnapshotStreams())if(stream.snapshotStreamID==2){quality=stream.quality;minimum=stream.minResolution;maximum=stream.maxResolution;}
         }
-        try{return capture_(quality,image);}catch(...){return Status::Failure;}
+        if(!SnapshotFits(resolution.width,resolution.height,minimum.width,minimum.height,maximum.width,maximum.height))return Status::DynamicConstraintError;
+        try{return capture_(quality,resolution.width,resolution.height,image);}catch(...){return Status::Failure;}
     }
     void OnStreamUsagePrioritiesChanged() override {}
     void OnAttributeChanged(chip::AttributeId id) override {if(attributeChanged)attributeChanged(id);}
@@ -227,6 +230,7 @@ private:
     std::vector<av::AudioStreamStruct> audioStreams_;
     bool snapshotAllocated_=false;
     unsigned snapshotQuality_=70;
+    av::VideoResolutionStruct snapshotMin_{320,180},snapshotMax_{320,180};
     bool reserved_=false, prepared_=false, active_=false, enabled_=true, fault_=false, privacy_=false;
     std::vector<av::VideoStreamStruct> streams_;
 };

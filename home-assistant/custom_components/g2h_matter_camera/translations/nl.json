@@ -1,0 +1,25 @@
+{
+  "title": "G2H Matter Camera",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Gebruik de bestaande G2H-Matter-koppeling",
+        "description": "Kies de G2H-camera die al aan deze Matter-integratie gekoppeld is. Staat die er niet tussen, voeg de huidige camera eerst toe via de Matter-integratie met zijn camerakoppelcode. Deze uitbreiding gebruikt vervolgens dezelfde koppeling. Matter-server API-schema: {schema}.",
+        "data": {
+          "node_id": "G2H Matter-apparaat"
+        }
+      }
+    },
+    "error": {
+      "camera_api_missing": "De Matter-server meldt API-schema {schema}; voor camerabeeld is schema 12 of hoger nodig.",
+      "no_camera": "De geselecteerde camera is niet meer beschikbaar.",
+      "not_g2h_camera": "Dit Matter-apparaat meldt geen G2H Matter-camera. Kies de bestaande Linux-camera, niet de oude radiokoppeling.",
+      "matter_read_failed": "De geselecteerde Matter-camera kon niet worden uitgelezen. Controleer of deze beschikbaar is in de Matter-integratie."
+    },
+    "abort": {
+      "matter_not_ready": "Configureer eerst de Matter-integratie.",
+      "no_camera": "Geen al gekoppelde G2H-Matter-camera gevonden.",
+      "already_configured": "Deze camera is al ingesteld."
+    }
+  }
+}
