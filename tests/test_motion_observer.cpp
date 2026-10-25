@@ -28,7 +28,7 @@ int main(){
     auto first=observer.Observe(211);assert(first.Value()==false);assert(observer.HashAttempts()==1);
     f.Set(1,1);assert(observer.Observe(211).Value()==true);assert(observer.HashAttempts()==1);
     f.Set(0,1);assert(observer.Observe(211).Value()==false);assert(observer.HashAttempts()==1);
-    assert(!first.Value(first.sampledMs+2001));assert(!first.Value(first.sampledMs-1));
+    assert(first.Value(first.sampledMs+kMotionFreshnessMs)==false);assert(!first.Value(first.sampledMs+kMotionFreshnessMs+1));assert(!first.Value(first.sampledMs-1));
     f.Set(1,0);assert(!observer.Observe(211).Value());
     f.Set(2,1);assert(!observer.Observe(211).Value());
     f.Set(1,1);Text(f.pid/"maps","00550000-00560000 r--p 00000000 00:00 0\n");assert(!observer.Observe(211).Value());

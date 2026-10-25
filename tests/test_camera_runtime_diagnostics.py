@@ -39,7 +39,7 @@ class RuntimeExport(unittest.IsolatedAsyncioTestCase):
         cause=ClientError('DO_NOT_EXPORT');error=ValueError('DO_NOT_EXPORT');error.__cause__=cause
         radio=types.SimpleNamespace(last_update_success=False,last_exception=error,closed=False,
             data={'role':'router','channel':25,'children':0,'neighbors_table':'DO_NOT_EXPORT'})
-        motion=types.SimpleNamespace(last_update_success=True,last_exception=None,closed=False,fresh=False,
+        motion=types.SimpleNamespace(poll_timing={'reads':12,'expiries':1,'last_read_ms':25,'private':'DO_NOT_EXPORT','errors':False},last_update_success=True,last_exception=None,closed=False,fresh=False,
             data={'motion':False,'producer_enabled':False,'reason':'native-producer-disabled','sample_age_ms':100,'freshness_window_ms':2000})
         self.hass=types.SimpleNamespace(adapter=types.SimpleNamespace(matter_client=self.client),
             config_entries=types.SimpleNamespace(async_get_entry=lambda key:types.SimpleNamespace(data={'url':'ws://DO_NOT_EXPORT.invalid/?token=DO_NOT_EXPORT'})),
@@ -53,6 +53,7 @@ class RuntimeExport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['radio']['error_class'],'ValueError');self.assertEqual(result['radio']['cause_class'],'ClientError')
         self.assertEqual(result['radio']['table_lengths']['neighbors'],13);self.assertIsNone(result['motion']['motion'])
         self.assertNotIn('DO_NOT_EXPORT',json.dumps(result))
+        self.assertEqual(result['motion']['poll_timing'],{'reads':12,'expiries':1,'last_read_ms':25})
         paths=[f'0/{0xFFF1FC10}/{i}' for i in (0,1,2)]
         self.client.read_attribute.assert_awaited_once_with(73,paths)
         self.assertEqual(Wire.requests,[('read_attribute',{'node_id':73,'attribute_path':paths})])

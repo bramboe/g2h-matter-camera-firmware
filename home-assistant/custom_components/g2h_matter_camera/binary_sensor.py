@@ -23,6 +23,8 @@ class MotionCoordinator(DataUpdateCoordinator):
         self._expiry_generation = 0
         self._precise_task = None
         self._precise_handle = None
+        self.poll_timing = {'reads':0,'expiries':0,'expired_during_read':0,'native_stale':0,'errors':0}
+        self._read_started = None
     def _schedule_refresh(self):
         # HA 2026.10 rounds its standard coordinator schedule to whole seconds;
         # that can place a 500-ms interval in the past. Schedule relative to the
@@ -91,6 +93,9 @@ class MotionCoordinator(DataUpdateCoordinator):
             return
         # Change the meaningful state once. This also makes a later fresh
         # sample trigger recovery even when its boolean matches the old value.
+        self.poll_timing['expiries'] += 1
+        if self._read_started is not None:self.poll_timing['expired_during_read'] += 1
+        self.poll_timing['expiry_sample_age_ms'] = int(self._sample_age_ms + (self.hass.loop.time()-self._received_at)*1000)
         self._expiry_generation += 1
         values = dict(self.data)
         values['expiry_generation'] = self._expiry_generation
@@ -99,18 +104,30 @@ class MotionCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         if self.closed:
             raise UpdateFailed('Motion coordinator stopped')
+        self._read_started = self.hass.loop.time()
+        self.poll_timing['reads'] += 1
         try:
             values = motion_values(await read_cluster(self.hass, self.entry, MOTION_CLUSTER, (0,1,2,3,5,6), timeout=2))
-            self._received_at = self.hass.loop.time()
+            received_at = self.hass.loop.time()
+            duration = max(0,int((received_at-self._read_started)*1000))
+            # Conservatively include the entire read round trip in sample age.
+            # A slow response must not extend the producer-advertised lease.
+            self._received_at = self._read_started
+            self.poll_timing['last_read_ms'] = duration
+            self.poll_timing['max_read_ms'] = max(duration,self.poll_timing.get('max_read_ms',0))
             self._sample_age_ms = values.pop('sample_age_ms')
             self._window_ms = values['freshness_window_ms']
+            if self._sample_age_ms is not None and self._window_ms is not None:
+                self.poll_timing['remaining_at_response_ms'] = max(0,self._window_ms-self._sample_age_ms-duration)
+            if values['motion'] is None and values['reason'] in ('stale','sample-expired'):
+                self.poll_timing['native_stale'] += 1
             if values['motion'] is None and values['reason'] in ('stale','sample-expired'):
                 values.update({'producer_enabled':None, 'reason':'sample-expired'})
             if self.expiry is not None:
                 self.expiry.cancel()
                 self.expiry = None
             if values['motion'] is not None:
-                delay = max(0, (self._window_ms-self._sample_age_ms)/1000)
+                delay = max(0, (self._window_ms-self._sample_age_ms)/1000-(received_at-self._received_at))
                 # A slow/disconnected next read must not keep the old motion
                 # state available beyond the radio's stated freshness window.
                 self.expiry = self.hass.loop.call_later(delay, self._expire)
@@ -120,7 +137,10 @@ class MotionCoordinator(DataUpdateCoordinator):
             values['expiry_generation'] = self._expiry_generation
             return values
         except (ValueError, OSError, TimeoutError) as err:
+            self.poll_timing['errors'] += 1
             raise UpdateFailed('Cannot read native motion through Matter') from err
+        finally:
+            self._read_started = None
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = MotionCoordinator(hass, entry)
     hass.data[DOMAIN][entry.entry_id]['motion'] = coordinator

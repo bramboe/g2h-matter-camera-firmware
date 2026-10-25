@@ -20,6 +20,8 @@
 #include <utility>
 
 namespace g2h {
+// One-second producer cadence plus a two-second read deadline and scheduling margin.
+inline constexpr std::uint16_t kMotionFreshnessMs=4000;
 namespace motion_detail {
 inline constexpr std::uint32_t kValue=0x559fa8,kEnabled=0x559fc5;
 inline constexpr const char *kSha="f942639021769407028aa41e1064d794dd86f07ffab1442a91112c2aa678c799";
@@ -99,10 +101,10 @@ struct MotionObservation{
     std::optional<bool> heldMotion;std::uint64_t sampledMs=0;const char *reason="not-sampled";
     std::optional<bool> producerEnabled;
     std::optional<bool> Value(std::uint64_t nowMs=motion_detail::Now())const{
-        if(!heldMotion||nowMs<sampledMs||nowMs-sampledMs>2000)return {};return heldMotion;
+        if(!heldMotion||nowMs<sampledMs||nowMs-sampledMs>kMotionFreshnessMs)return {};return heldMotion;
     }
     std::optional<bool> Enabled(std::uint64_t nowMs=motion_detail::Now())const{
-        if(!sampledMs||nowMs<sampledMs||nowMs-sampledMs>2000)return {};return producerEnabled;
+        if(!sampledMs||nowMs<sampledMs||nowMs-sampledMs>kMotionFreshnessMs)return {};return producerEnabled;
     }
 };
 

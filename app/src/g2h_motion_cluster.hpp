@@ -53,12 +53,12 @@ public:
         if(id==kReason)return encoder.Encode(CharSpan::fromCharString(Reason(s)));
         if(id==kSource)return encoder.Encode(CharSpan::fromCharString("vendor-vision-held-motion"));
         if(id==kSampleAgeMs){Nullable<uint32_t> value;auto now=motion_detail::Now();if(s.sampledMs&&now>=s.sampledMs)value.SetNonNull(uint32_t(std::min<uint64_t>(now-s.sampledMs,std::numeric_limits<uint32_t>::max())));return encoder.Encode(value);}
-        if(id==kFreshnessWindowMs)return encoder.Encode<uint16_t>(2000);
+        if(id==kFreshnessWindowMs)return encoder.Encode<uint16_t>(kMotionFreshnessMs);
         return Protocols::InteractionModel::Status::UnsupportedAttribute;
     }
 private:
     static const char *Reason(const MotionObservation&s){
-        auto now=motion_detail::Now();if(s.sampledMs&&(now<s.sampledMs||now-s.sampledMs>2000))return "stale";
+        auto now=motion_detail::Now();if(s.sampledMs&&(now<s.sampledMs||now-s.sampledMs>kMotionFreshnessMs))return "stale";
         // All observer reasons are static constants, never a process string,
         // exception text, kernel path or captured memory dump.
         return s.reason;

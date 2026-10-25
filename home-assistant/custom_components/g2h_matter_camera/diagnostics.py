@@ -78,6 +78,9 @@ def _coordinator_summary(coordinator, motion=False):
               'closed': bool(getattr(coordinator,'closed',False)),
               **_exception_classes(getattr(coordinator,'last_exception',None))}
     if motion:
+        timing=getattr(coordinator,'poll_timing',{})
+        if isinstance(timing,dict):
+            result['poll_timing']={key:timing[key] for key in ('reads','expiries','expired_during_read','native_stale','errors','last_read_ms','max_read_ms','remaining_at_response_ms','expiry_sample_age_ms') if type(timing.get(key)) is int and 0<=timing[key]<=2**63-1}
         fresh = bool(getattr(coordinator,'fresh',False))
         reason = data.get('reason')
         result['fresh'] = fresh

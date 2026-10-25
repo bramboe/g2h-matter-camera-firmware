@@ -18,7 +18,7 @@ int main(){
     assert(cluster.GetDataVersion(path)==version+4);version=cluster.GetDataVersion(path);
     set(true,"native-held-motion",true,100);
     assert(cluster.GetDataVersion(path)==version);
-    set(true,"native-held-motion",true,2001);
+    set(true,"native-held-motion",true,g2h::kMotionFreshnessMs+1);
     assert(cluster.GetDataVersion(path)==version+4);version=cluster.GetDataVersion(path);
     set(false,"native-held-motion",true);
     assert(cluster.GetDataVersion(path)==version+4);version=cluster.GetDataVersion(path);

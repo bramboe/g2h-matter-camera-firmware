@@ -33,7 +33,7 @@ Vendor cluster `0xFFF1FC12`, endpoint 0, revision 1:
 | 3 | Bounded static status reason |
 | 4 | Source label: `vendor-vision-held-motion` |
 | 5 | Sample age in milliseconds (nullable uint32) |
-| 6 | Freshness window in milliseconds (2000) |
+| 6 | Freshness window in milliseconds (4000 in the new source candidate; older images advertise 2000) |
 
 HA polls explicit attributes 0/1/2/3/5/6 every half second (the native observer samples once per second).
 The coordinator uses a precise relative monotonic timer because HA 2026.10
@@ -42,7 +42,9 @@ poll, waits at least 500 ms after a completed read, honors disabled polling and
 longer retry delays, and cancels its timer/read task on unload. It does not
 catch up overdue polls in a burst. A local monotonic
 expiry also marks the entity unavailable when sample age exceeds the stated
-window, even if the following server request is slow or disconnected. Scheduled
+window, even if the following server request is slow or disconnected. HA
+conservatively counts the complete request/response duration as additional sample
+age; receiving a slow response does not renew the sample lease. Scheduled
 expiry and coordinator polling are stopped when the extension unloads; the
 shared official HA Matter client is never closed by this extension.
 
@@ -89,7 +91,11 @@ recovery and a disabled producer each advance the version. Compile it against
 the production SDK with assertions enabled (`-UNDEBUG`). The ARM test was run
 on the camera without reading native process memory or altering camera state.
 
-Live qualification still observes occasional unavailable/recovered transitions
-under load at the strict two-second freshness deadline. These are distinct from
-unchanged-age notification churn. Do not present an expired sample as clear or
-claim this candidate has completed motion availability qualification.
+The earlier two-second image showed an expiry during a 1.19-second read, with
+no native stale samples or read errors in the measured interval. The new source
+candidate advertises four seconds: one-second producer cadence, a two-second
+read deadline and scheduling margin. This changes the explicit lease; it does
+not keep a value available past that lease. Four-second hardware qualification
+is still pending. Downloaded diagnostics contain bounded timing counters (read
+latency, expiry during a read, native stale samples and errors), never raw frames,
+process memory or credentials. See [the follow-up report](TEST-REPORT-2026-10-25.md).

@@ -160,13 +160,28 @@ class Platforms(unittest.IsolatedAsyncioTestCase):
         initial=coordinator.notifications
         async def delayed(node,paths):
             await asyncio.sleep(.09)
-            return dict(values)
+            return dict(values,**{p+'6':200})
         self.client.read_attribute.side_effect=delayed
         # Capture the pre-read data just as HA does. Expiry runs while waiting.
         await coordinator.async_refresh()
         self.assertTrue(entity.available);self.assertIs(entity.is_on,False)
         self.assertEqual(coordinator.notifications,initial+2)
         self.assertEqual(coordinator.data['expiry_generation'],1)
+        self.assertEqual(coordinator.poll_timing['expiries'],1)
+        self.assertEqual(coordinator.poll_timing['expired_during_read'],1)
+        self.assertEqual(coordinator.poll_timing['reads'],2)
+        self.assertGreaterEqual(coordinator.poll_timing['last_read_ms'],80)
+        await coordinator.close()
+    async def test_slow_response_never_extends_the_sample_lease(self):
+        p=diagnostics.MOTION_PATH
+        async def delayed(node,paths):
+            await asyncio.sleep(.09)
+            return {p+'0':True,p+'1':False,p+'2':True,p+'3':'native-held-motion',p+'5':0,p+'6':60}
+        self.client.read_attribute.side_effect=delayed
+        coordinator=motion.MotionCoordinator(self.hass,self.entry)
+        await coordinator.async_refresh()
+        self.assertFalse(coordinator.fresh)
+        self.assertEqual(coordinator.poll_timing['remaining_at_response_ms'],0)
         await coordinator.close()
     async def test_expiry_and_same_boolean_recovery_each_notify_once(self):
         p=diagnostics.MOTION_PATH;values={p+'0':True,p+'1':False,p+'2':True,p+'3':'native-held-motion',p+'5':10,p+'6':100}
