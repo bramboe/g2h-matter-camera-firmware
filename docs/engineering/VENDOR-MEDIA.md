@@ -130,16 +130,16 @@ endpoint 0, revision 1, using the camera's existing Matter identity:
 
 | Attribute | Type | Meaning |
 | --- | --- | --- |
-| 0 | Boolean | A held-motion value is known and no older than 2 seconds |
+| 0 | Boolean | A held-motion value is known and within the advertised freshness limit |
 | 1 | Nullable Boolean | Observed native held-motion state |
 | 2 | Nullable Boolean | Observed native producer enable flag |
 | 3 | String | Static status/failure reason |
 | 4 | String | `vendor-vision-held-motion` |
 | 5 | Nullable uint32 | Sample age in milliseconds |
-| 6 | uint16 | Freshness limit: 2000 milliseconds |
+| 6 | uint16 | Freshness limit: 4000 milliseconds in the new source (earlier images: 2000) |
 
 A verified disabled producer yields fresh=false, motion=null, enabled=false;
-it does not yield motion=false. After 2 seconds, both measured values expire.
+it does not yield motion=false. After the advertised freshness limit, both measured values expire.
 Unsupported images, permission failure and incomplete reads also yield unknown.
 The observer must run on a dedicated worker at most once per second, not the
 Matter event loop. This code and the isolated ARM cluster compile have offline

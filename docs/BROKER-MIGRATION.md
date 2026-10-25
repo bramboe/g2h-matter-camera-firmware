@@ -13,6 +13,18 @@ has a bounded 256 KiB requested socket buffer and a 250 ms write deadline;
 video retains its 64 KiB requested buffer and 25 ms deadline. Actual kernel
 buffer limits can differ.
 
+## Native server startup
+
+The local socket listener can be ready before the native RTSP port is listening.
+If the native socket constructor fails, no RTSP command or session exists yet.
+The broker now closes that subscriber and permits another connection attempt
+after five seconds. It does not continually reconnect in the background.
+
+After the constructor succeeds, any DESCRIBE/SETUP/PLAY or ingest failure remains
+latched and retains the existing full-boot recovery requirement. This protects
+the vendor's fragile session ownership. Synthetic regression tests cover both a
+late-listening server and a handshake failure that must not be retried.
+
 ## Maintenance procedure
 
 1. Close all Matter live views. Run the host check and backup tools. Keep the

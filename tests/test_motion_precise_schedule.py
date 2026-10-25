@@ -31,6 +31,16 @@ class PreciseSchedule(unittest.IsolatedAsyncioTestCase):
         self.entry.pref_disable_polling=False;coordinator._schedule_refresh();self.assertEqual(len(loop.active()),1)
         await coordinator.close();self.assertFalse(loop.active());self.assertIsNone(coordinator._unsub_refresh)
         coordinator._schedule_refresh();self.assertFalse(loop.active())
+    async def test_one_retained_timeout_retry_is_prompt_not_a_polling_burst(self):
+        loop=FractionalLoop();self.hass.loop=loop
+        coordinator=motion.MotionCoordinator(self.hass,self.entry)
+        coordinator._lease_retry_pending=True;coordinator._schedule_refresh()
+        self.assertEqual(len(loop.active()),1);self.assertAlmostEqual(loop.active()[0].when-loop.now,.05)
+        coordinator._schedule_refresh()
+        self.assertEqual(len(loop.active()),1);self.assertAlmostEqual(loop.active()[0].when-loop.now,.5)
+        coordinator._lease_retry_pending=True;coordinator._retry_after=3;coordinator._schedule_refresh()
+        self.assertEqual(len(loop.active()),1);self.assertAlmostEqual(loop.active()[0].when-loop.now,3)
+        await coordinator.close();self.assertFalse(loop.active())
     async def test_real_polls_are_spaced_after_completion(self):
         times=[];p=diagnostics.MOTION_PATH
         async def response(node,paths):

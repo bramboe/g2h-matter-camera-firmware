@@ -172,6 +172,57 @@ class Platforms(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coordinator.poll_timing['reads'],2)
         self.assertGreaterEqual(coordinator.poll_timing['last_read_ms'],80)
         await coordinator.close()
+    async def test_transient_failure_keeps_only_the_original_valid_lease(self):
+        p=diagnostics.MOTION_PATH
+        self.client.read_attribute.return_value={p+'0':True,p+'1':False,p+'2':True,p+'3':'native-held-motion',p+'5':0,p+'6':120}
+        coordinator=motion.MotionCoordinator(self.hass,self.entry);await coordinator.async_refresh()
+        received,expiry=coordinator._received_at,coordinator.expiry
+        notifications=coordinator.notifications
+        self.client.read_attribute.side_effect=TimeoutError()
+        await coordinator.async_refresh()
+        self.assertTrue(coordinator.fresh);self.assertTrue(coordinator.last_update_success)
+        self.assertEqual(coordinator.notifications,notifications)
+        self.assertEqual(coordinator._received_at,received);self.assertIs(coordinator.expiry,expiry)
+        self.assertEqual(coordinator.poll_timing['errors'],1);self.assertEqual(coordinator.poll_timing['retained_on_error'],1)
+        await asyncio.sleep(.16)
+        self.assertFalse(coordinator.fresh);self.assertIsNone(coordinator.data['motion'])
+        await coordinator.async_refresh();self.assertFalse(coordinator.last_update_success)
+        self.assertEqual(coordinator.poll_timing['retained_on_error'],1)
+        await coordinator.close()
+    async def test_local_timeouts_share_one_remote_request_until_its_reply(self):
+        p=diagnostics.MOTION_PATH;values={p+'0':True,p+'1':False,p+'2':True,p+'3':'native-held-motion',p+'5':0,p+'6':4000}
+        self.client.read_attribute.return_value=values
+        coordinator=motion.MotionCoordinator(self.hass,self.entry);await coordinator.async_refresh()
+        async def delayed(node,paths):await asyncio.sleep(.13);return values
+        self.client.read_attribute.side_effect=delayed
+        with patch.object(motion,'MOTION_WAIT_SECONDS',.04):
+            await coordinator.async_refresh();task=coordinator._remote_read
+            self.assertIsNotNone(task);self.assertFalse(task.done())
+            await coordinator.async_refresh();self.assertIs(coordinator._remote_read,task)
+            self.assertEqual(self.client.read_attribute.await_count,2)
+            await asyncio.sleep(.07);await coordinator.async_refresh()
+        self.assertIsNone(coordinator._remote_read);self.assertTrue(coordinator.fresh)
+        self.assertEqual(coordinator.poll_timing['reads'],2)
+        self.assertEqual(coordinator.poll_timing['coalesced_waits'],2)
+        self.assertEqual(self.client.read_attribute.await_count,2)
+        await coordinator.close()
+    async def test_unload_cancels_the_single_shielded_request(self):
+        p=diagnostics.MOTION_PATH;values={p+'0':True,p+'1':True,p+'2':True,p+'3':'native-held-motion',p+'5':0,p+'6':4000}
+        self.client.read_attribute.return_value=values
+        coordinator=motion.MotionCoordinator(self.hass,self.entry);await coordinator.async_refresh()
+        async def pending(node,paths):await asyncio.Event().wait()
+        self.client.read_attribute.side_effect=pending
+        with patch.object(motion,'MOTION_WAIT_SECONDS',.01):await coordinator.async_refresh()
+        task=coordinator._remote_read;self.assertFalse(task.done())
+        await coordinator.close();self.assertTrue(task.cancelled());self.assertIsNone(coordinator._remote_read)
+    async def test_malformed_response_is_not_hidden_by_a_valid_cached_sample(self):
+        p=diagnostics.MOTION_PATH
+        self.client.read_attribute.return_value={p+'0':True,p+'1':True,p+'2':True,p+'3':'native-held-motion',p+'5':0,p+'6':4000}
+        coordinator=motion.MotionCoordinator(self.hass,self.entry);await coordinator.async_refresh()
+        self.client.read_attribute.return_value=None
+        await coordinator.async_refresh();self.assertFalse(coordinator.last_update_success)
+        self.assertEqual(coordinator.poll_timing['retained_on_error'],0)
+        await coordinator.close()
     async def test_slow_response_never_extends_the_sample_lease(self):
         p=diagnostics.MOTION_PATH
         async def delayed(node,paths):

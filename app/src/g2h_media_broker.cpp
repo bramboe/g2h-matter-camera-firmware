@@ -38,7 +38,7 @@ private:
   for(unsigned i=0;i<2;++i){
    int next=accept(listener_,nullptr,nullptr);if(next<0)return;
    if(client_>=0){pollfd p{client_,POLLIN,0};if(poll(&p,1,0)>0){char c;auto n=recv(client_,&c,1,MSG_PEEK|MSG_DONTWAIT);if(n<=0)CloseClient();}}
-   if(client_>=0||fault_||!PeerAllowed(next)||fcntl(next,F_SETFL,O_NONBLOCK)||fcntl(next,F_SETFD,FD_CLOEXEC)){close(next);continue;}
+   if(client_>=0||fault_||Clock::now()<connectRetryAt_||!PeerAllowed(next)||fcntl(next,F_SETFL,O_NONBLOCK)||fcntl(next,F_SETFD,FD_CLOEXEC)){close(next);continue;}
 #ifdef SO_NOSIGPIPE
    int one=1;setsockopt(next,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof(one));
 #endif
@@ -52,7 +52,21 @@ private:
      info_.audio=audio_;
      if(audio_){auto track=source_->StartAudio();info_.payload=track.payload;info_.channel=track.channel;}
      else{source_->Start();info_.payload=36;info_.channel=0;info_.sps=source_->parameters.sps;info_.pps=source_->parameters.pps;}
-    }catch(...){fault_=true;CloseClient();std::fputs(audio_?"media audio source fault\n":"media video source fault\n",stderr);continue;}
+    }catch(...){
+     CloseClient();
+     if(!source_){
+      // The socket constructor failed before any RTSP command was sent. Boot
+      // may expose our local listener before the native server starts listening.
+      // Retry only this safe unopened state, with a bounded connection rate.
+      connectRetryAt_=Clock::now()+std::chrono::seconds(5);
+      std::fputs(audio_?"media audio connect deferred\n":"media video connect deferred\n",stderr);
+     }else{
+      // A DESCRIBE/SETUP/PLAY attempt may have native state: retain its ownership
+      // and require the established full-boot recovery rather than reopening it.
+      fault_=true;std::fputs(audio_?"media audio source fault\n":"media video source fault\n",stderr);
+     }
+     continue;
+    }
    }
    // An abandoning/slow subscriber is not a source fault. Keep draining the
    // already-open native session and permit the next subscriber to reconnect.
@@ -89,7 +103,7 @@ private:
  }
  const std::string directory_;std::string path_;bool audio_,threaded_=false,bound_=false,fault_=false;
  std::uint16_t port_;int listener_=-1,client_=-1;pthread_t thread_{};
- std::unique_ptr<Rtsp> source_;Info info_;
+ std::unique_ptr<Rtsp> source_;Info info_;Clock::time_point connectRetryAt_{};
 };
 }
 int main(int argc,char **argv){

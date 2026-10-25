@@ -38,7 +38,7 @@ Vendor cluster `0xFFF1FC12`, endpoint 0, revision 1:
 HA polls explicit attributes 0/1/2/3/5/6 every half second (the native observer samples once per second).
 The coordinator uses a precise relative monotonic timer because HA 2026.10
 rounds the normal coordinator schedule to whole seconds. It keeps one pending
-poll, waits at least 500 ms after a completed read, honors disabled polling and
+poll, normally waits at least 500 ms after a completed read, honors disabled polling and
 longer retry delays, and cancels its timer/read task on unload. It does not
 catch up overdue polls in a burst. A local monotonic
 expiry also marks the entity unavailable when sample age exceeds the stated
@@ -47,6 +47,22 @@ conservatively counts the complete request/response duration as additional sampl
 age; receiving a slow response does not renew the sample lease. Scheduled
 expiry and coordinator polling are stopped when the extension unloads; the
 shared official HA Matter client is never closed by this extension.
+
+Local waits are bounded to two seconds. The coordinator keeps one underlying
+remote read, bounded to thirty seconds, across local wait timeouts. Cancelling a
+local HA future does not cancel the server operation; retaining that operation
+prevents subsequent polls from adding more requests behind it. A late response
+is aged from the original request start and cannot renew an expired sample.
+Unload cancels the retained task. This queue-prevention change has regression
+coverage and is active in HA. The follow-up report records both successful
+reads and remaining genuine expiry events during runtime checks.
+
+A single transport timeout or OS transport error may retain the last sample
+only while its original lease is still valid. This does not refresh its sample
+time or move the expiry timer. One prompt 50-ms retry follows that retained
+failure; normal polling stays at 500 ms, no concurrent request is added, and
+explicit longer retry delays take priority. Invalid/unsupported responses fail
+closed immediately. A longer interruption still expires the sample normally.
 
 The device reports state/producer/reason changes through Matter. Merely
 refreshing the sample timestamp does not dirty the age attribute or advance the
@@ -95,7 +111,9 @@ The earlier two-second image showed an expiry during a 1.19-second read, with
 no native stale samples or read errors in the measured interval. The new source
 candidate advertises four seconds: one-second producer cadence, a two-second
 read deadline and scheduling margin. This changes the explicit lease; it does
-not keep a value available past that lease. Four-second hardware qualification
-is still pending. Downloaded diagnostics contain bounded timing counters (read
+not keep a value available past that lease. The four-second app has passed guarded installation and full-boot checks.
+The broker and earlier HA transient-error logic passed a five-minute media sample; one longer
+control-path interruption still correctly expired a sample. This is not a claim
+of uninterrupted control-path availability. Downloaded diagnostics contain bounded timing counters (read
 latency, expiry during a read, native stale samples and errors), never raw frames,
 process memory or credentials. See [the follow-up report](TEST-REPORT-2026-10-25.md).

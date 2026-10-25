@@ -19,9 +19,11 @@ def exact(s,n):
   b+=c
  return b
 class Native:
- def __init__(self):
-  self.listener=socket.socket();self.listener.bind(('127.0.0.1',0));self.listener.listen();self.listener.settimeout(.1)
-  self.port=self.listener.getsockname()[1];self.stop=False;self.partial_record=False;self.play_gate=None;self.play_entered=threading.Event();self.clients=[];self.played=0;self.teardowns=0;self.threads=[]
+ def __init__(self,listener=None):
+  self.listener=listener if listener is not None else socket.socket()
+  if listener is None:self.listener.bind(('127.0.0.1',0))
+  self.listener.listen();self.listener.settimeout(.1)
+  self.port=self.listener.getsockname()[1];self.stop=False;self.partial_record=False;self.bad_sdp=False;self.describes=0;self.play_gate=None;self.play_entered=threading.Event();self.clients=[];self.played=0;self.teardowns=0;self.threads=[]
   self.thread=threading.Thread(target=self.accept,daemon=True);self.thread.start()
  def accept(self):
   while not self.stop:
@@ -37,7 +39,8 @@ class Native:
     if not b:return
     if b'\r\n\r\n' not in b:continue
     request,b=b.split(b'\r\n\r\n',1);method=request.split()[0]
-    body=SDP if method==b'DESCRIBE' else b''
+    body=(b'invalid SDP' if self.bad_sdp else SDP) if method==b'DESCRIBE' else b''
+    if method==b'DESCRIBE':self.describes+=1
     if method==b'SETUP' and b'/trackID=1' in request:audio=True
     if method==b'PLAY':
      self.play_entered.set()
@@ -99,6 +102,33 @@ class BrokerTests(unittest.TestCase):
   abandoned.close();self.native.play_gate.set();time.sleep(.1)
   with self.subscribe() as c:self.assertEqual(len(self.record(c)),16000)
   self.assertEqual(self.native.played,1);self.assertEqual(self.native.teardowns,0)
+ def test_initial_connect_failure_recovers_when_native_server_ready(self):
+  self.p.terminate();self.p.communicate(timeout=5);self.native.close()
+  reserved=socket.socket();self.addCleanup(reserved.close);reserved.bind(('127.0.0.1',0));port=reserved.getsockname()[1]
+  env=dict(os.environ,G2H_TEST_RTSP_PORT=str(port))
+  self.p=subprocess.Popen([str(self.binary),'--serve',str(self.path)],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+  deadline=time.monotonic()+3
+  while not (self.path/'video.sock').exists() and time.monotonic()<deadline:time.sleep(.01)
+  with socket.socket(socket.AF_UNIX) as c:
+   c.settimeout(5);c.connect(str(self.path/'video.sock'));self.assertEqual(c.recv(16),b'')
+  self.native=Native(listener=reserved)
+  # Do not reconnect native TCP repeatedly while its startup is still settling.
+  with socket.socket(socket.AF_UNIX) as c:
+   c.settimeout(2);c.connect(str(self.path/'video.sock'));self.assertEqual(c.recv(16),b'')
+  self.assertEqual(self.native.describes,0)
+  time.sleep(5.05)
+  for _ in range(2):
+   with self.subscribe() as c:self.assertEqual(len(self.record(c)),16000)
+   time.sleep(.05)
+  self.assertEqual(self.native.played,1);self.assertEqual(self.native.teardowns,0)
+ def test_rtsp_handshake_failure_stays_latched(self):
+  self.native.bad_sdp=True
+  with socket.socket(socket.AF_UNIX) as c:
+   c.settimeout(2);c.connect(str(self.path/'video.sock'));self.assertEqual(c.recv(16),b'')
+  self.native.bad_sdp=False
+  with socket.socket(socket.AF_UNIX) as c:
+   c.settimeout(2);c.connect(str(self.path/'video.sock'));self.assertEqual(c.recv(16),b'')
+  self.assertEqual(self.native.describes,1);self.assertEqual(self.native.played,0)
  def test_native_partial_record_fault_rejects_reconnect_promptly(self):
   self.native.partial_record=True
   with self.subscribe() as c:

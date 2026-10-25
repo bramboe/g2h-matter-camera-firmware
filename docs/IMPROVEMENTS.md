@@ -8,10 +8,10 @@ Actual candidate results and remaining checks are recorded in
 | Area | Candidate behavior | Qualification still needed |
 |---|---|---|
 | Thread use | Counts/tables for attached children, neighbors, known routers; raw MAC activity and uptime, independent freshness | Longer topology/traffic observation; bounded table delivery and real samples passed in HA |
-| Media reliability | Separate private Unix-socket broker retains native RTSP ownership across Matter app restarts; bounded buffers discard slow subscribers | Three decoded HA reopen cycles and retained-session app restarts passed; longer disconnection/soak checks remain |
+| Media reliability | Separate private Unix-socket broker retains native RTSP ownership across Matter app restarts; bounded buffers discard slow subscribers | Repeated HA opens, retained-session app restarts and final broker full boot passed; initial-connect retry tested; extended interruption/soak checks remain |
 | Talkback mute | Invalidate queued/partial codec audio across mute and Matter privacy; no stale command dispatched after the mute barrier | Audible device test; an already accepted chunk may finish for 0.512 s |
-| Snapshots | Advertise 320×180 and 640×360; actual dimensions validated, per-resolution cache; bounded 64,000-byte JPEG | Two 640×360 HA downloads independently decoded while live video continued; large high-entropy JPEGs fail closed |
-| Motion | Exact-hash/PID/lifetime-bound read-only observation of proven native held-motion fields, exposed through development vendor cluster | Broader native image support and occasional freshness-related availability transitions under load; detected/clear and SDK change-only reporting checks passed |
+| Snapshots | Advertise 320×180 and 640×360; actual dimensions validated, per-resolution cache; bounded 64,000-byte JPEG | 640×360 HA downloads independently decoded during live video; an intermittent controller timeout was observed; oversized JPEGs fail closed |
+| Motion | Exact-hash/PID/lifetime-bound read-only observation of proven native held-motion fields, exposed through development vendor cluster | Four-second lease with unchanged expiry across transient errors; detected/clear and SDK change-only checks passed; longer control outages still become unavailable |
 | Updates | Separate slot, fresh private backup, unchanged identity/state, independent timeout and boot rollback | Physical disconnected-install, restart and power-loss qualification |
 | Build/release | Pinned inputs, source and link-input provenance, source/relink bundles and validation | Independent rebuild on a second host and full release qualification |
 
