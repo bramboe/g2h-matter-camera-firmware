@@ -41,6 +41,7 @@ captured camera image is included in this report.
 | Corrected broker HA reconnects | Three 1280×720 decoded HA sessions; explicit peer-ended idle states between sessions; 6,068 video frames and 15,357 Opus packets sent with zero AAC decode errors and unchanged host/native lifetime during the test |
 | Real SDK motion reporting test | ARM executable linked with the production SDK passed age-only/no-change and detection/expiry/recovery/disabled transition assertions on the camera; host/native process unchanged |
 | Final app HA media | Current app decoded 1280×720 video with advancing browser media time; two 640×360 JPEG downloads decoded independently with FFmpeg while live video continued; peer-ended idle observed afterward, total 4,171 video frames / 10,660 Opus packets, zero AAC decode errors |
+| HA microphone listening check | On 25 October the user enabled audio in the G2H HA camera view and confirmed clear, audible microphone sound; talkback and mute were not part of this check |
 | Final motion-only app slot | Exact current app accepted after the guarded startup window; native camera, corrected broker and host lifetime retained |
 | Native motion observation | Exact native image accepted; native reporting enabled; detected-to-clear transitions observed in the HA activity view |
 
@@ -76,8 +77,8 @@ prove how much end-device traffic was forwarded.
 
 - Occasional motion availability transitions under load at the strict two-second
   freshness deadline. Repeated unchanged ages no longer create motion state updates.
-- Audible microphone/talkback/mute quality checks. Encoded microphone packet
-  transmission and zero decode errors are established; audibility is not.
+- Audible talkback and mute quality checks. The user confirmed clear microphone
+  audio in HA on 25 October; this does not qualify the reverse audio path or mute.
 - Extended soak, deliberate LAN outage, disconnected update, physical power-cut
   recovery, and a clean build on a second host.
 
