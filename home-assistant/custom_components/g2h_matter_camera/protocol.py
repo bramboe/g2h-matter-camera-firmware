@@ -2,7 +2,7 @@
 import asyncio
 from contextlib import suppress
 import uuid
-from aiohttp import WSMsgType
+from aiohttp import WSMsgType,ClientError
 
 class MatterCameraError(Exception):
     """A bounded protocol or device error; excludes raw payloads/secrets."""
@@ -17,6 +17,8 @@ class MatterWire:
     def __init__(self, session, url, event=None):
         self.session=session; self.url=url; self.event=event
         self.ws=None; self.reader=None; self.pending={}; self.info={}
+        self._closing=False
+        self._transport_closed=False
     async def connect(self):
         self.ws=await self.session.ws_connect(self.url,heartbeat=30,max_msg_size=8*1024*1024)
         try:
@@ -38,6 +40,7 @@ class MatterWire:
             async for msg in self.ws:
                 if msg.type!=WSMsgType.TEXT: continue
                 data=msg.json()
+                if not isinstance(data,dict):raise MatterCameraError('Invalid Matter message shape')
                 if 'message_id' in data:
                     future=self.pending.get(str(data['message_id']))
                     if future is None or future.done(): continue
@@ -45,18 +48,29 @@ class MatterWire:
                         future.set_exception(MatterCameraError('Matter command refused (code '+str(data['error_code'])+')'))
                     else: future.set_result(data.get('result'))
                 elif self.event and data.get('event')=='webrtc_callback':
-                    self.event(data.get('data',{}))
+                    payload=data.get('data',{})
+                    if not isinstance(payload,dict):raise MatterCameraError('Invalid Matter event shape')
+                    self.event(payload)
+        except (MatterCameraError,ClientError,ValueError,TypeError,KeyError,AttributeError,RuntimeError):
+            # Protocol/transport details may contain SDP or private server data.
+            # The caller receives the bounded local connection-closed event.
+            pass
         finally:
+            self._transport_closed=True
             for future in list(self.pending.values()):
                 if not future.done():future.set_exception(MatterCameraError('Matter connection closed'))
+            if self.event is not None and not self._closing:
+                with suppress(Exception):
+                    self.event({'event_type':'connection_closed'})
     async def request(self, command, **args):
-        if self.ws is None or self.ws.closed:raise MatterCameraError('Matter connection unavailable')
+        if self.ws is None or self.ws.closed or self._transport_closed:raise MatterCameraError('Matter connection unavailable')
         key=uuid.uuid4().hex;future=asyncio.get_running_loop().create_future();self.pending[key]=future
         try:
             await self.ws.send_json({'message_id':key,'command':command,'args':args})
             return await asyncio.wait_for(future,40)
         finally:self.pending.pop(key,None)
     async def close(self):
+        self._closing=True
         if self.ws:await self.ws.close()
         if self.reader:
             self.reader.cancel()

@@ -80,7 +80,7 @@ def _coordinator_summary(coordinator, motion=False):
     if motion:
         timing=getattr(coordinator,'poll_timing',{})
         if isinstance(timing,dict):
-            result['poll_timing']={key:timing[key] for key in ('reads','expiries','expired_during_read','native_stale','errors','retained_on_error','coalesced_waits','last_read_ms','max_read_ms','remaining_at_response_ms','expiry_sample_age_ms') if type(timing.get(key)) is int and 0<=timing[key]<=2**63-1}
+            result['poll_timing']={key:timing[key] for key in ('reads','expiries','expired_during_read','native_stale','errors','retained_on_error','coalesced_waits','expired_responses','last_read_ms','max_read_ms','remaining_at_response_ms','expiry_sample_age_ms') if type(timing.get(key)) is int and 0<=timing[key]<=2**63-1}
         fresh = bool(getattr(coordinator,'fresh',False))
         reason = data.get('reason')
         result['fresh'] = fresh
@@ -91,6 +91,9 @@ def _coordinator_summary(coordinator, motion=False):
             value=getattr(coordinator,'_sample_age_ms',data.get(key)) if key=='sample_age_ms' else data.get(key)
             result[key]=value if isinstance(value,int) and not isinstance(value,bool) and 0<=value<=2**32-1 else None
     else:
+        timing=getattr(coordinator,'poll_timing',{})
+        if isinstance(timing,dict):
+            result['poll_timing']={key:timing[key] for key in ('reads','local_timeouts','blocked_reads','last_read_ms','max_read_ms') if type(timing.get(key)) is int and 0<=timing[key]<=2**63-1}
         role=data.get('role');result['role']=role if role in ('disabled','detached','child','router','leader') else None
         for key in ('channel','neighbors','children','routers','tx_total','rx_total','tx_retry','uptime_ms'):
             value=data.get(key)
@@ -125,10 +128,15 @@ async def async_get_config_entry_diagnostics(hass, entry):
 
     runtime = hass.data.get(DOMAIN,{}).get(entry.entry_id,{})
     node_available = getattr(runtime.get('node'),'available',None)
-    output={'extension_version':'0.4.0',
+    output={'extension_version':'0.4.1',
             'cached_node_available':node_available if isinstance(node_available,bool) else None,
             'radio':_coordinator_summary(runtime.get('radio')),
             'motion':_coordinator_summary(runtime.get('motion'),True)}
+    scanner=hass.data.get('g2h_matter_camera_auto_attach')
+    if scanner is not None:
+        output['auto_attach']={'enabled':not scanner.closed,
+            **{key:value for key,value in scanner.counters.items()
+               if key in ('scans','created','already_configured','failed') and type(value) is int and value>=0}}
     snapshot=runtime.get('snapshot')
     if isinstance(snapshot,dict):
         output['snapshot']={key:value for key,value in snapshot.items()

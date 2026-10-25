@@ -3,6 +3,8 @@
 The camera pairs as a single Matter device. You pair it once; video, snapshots,
 audio, talkback and controls then all run over that one pairing.
 
+Enable the [automatic HA attachment](AUTO-ATTACH.md) once before pairing.
+
 ## Steps
 
 1. On the camera, open a pairing window (900 s) with the provided install script,
@@ -18,7 +20,9 @@ audio, talkback and controls then all run over that one pairing.
 ## Display in Home Assistant
 
 Moving video was confirmed on HA 2026.10.2 with Matter server schema 13 using
-the project's custom camera integration. A paired node alone does not guarantee
+the project's custom camera integration. The automatic attachment observer
+removes its separate manual addition step; the extension still needs to be
+installed. HA 2026.10.2 presents it and Matter as linked device pages. A paired node alone does not guarantee
 a camera entity in every controller. The exact native HA camera UI version is
 not qualified here. See [the evidence matrix](COMPATIBILITY.md); do not re-pair
 an already paired device merely because its camera entity is absent.

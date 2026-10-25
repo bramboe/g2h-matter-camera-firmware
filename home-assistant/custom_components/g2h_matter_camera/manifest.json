@@ -1,7 +1,7 @@
 {
   "domain": "g2h_matter_camera",
   "name": "G2H Matter Camera",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "config_flow": true,
   "dependencies": [
     "matter"

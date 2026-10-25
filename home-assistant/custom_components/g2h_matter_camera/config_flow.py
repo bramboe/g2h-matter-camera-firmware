@@ -9,9 +9,43 @@ from homeassistant.components.matter.helpers import get_matter
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from . import DOMAIN
 from .protocol import MatterWire,MatterCameraError,MatterCameraCompatibilityError
-from .discovery import PATHS,camera_identity
+from .discovery import PATHS,camera_identity,is_camera_candidate
 class ConfigFlow(config_entries.ConfigFlow,domain=DOMAIN):
     VERSION=1
+    async def async_step_import(self,info):
+        """Verify an already commissioned G2H; never commission a new fabric."""
+        entries=self.hass.config_entries.async_loaded_entries('matter')
+        if len(entries)!=1 or info.get('matter_entry_id')!=entries[0].entry_id:
+            return self.async_abort(reason='matter_not_ready')
+        node_id=info.get('node_id')
+        if type(node_id) is not int or node_id<0:
+            return self.async_abort(reason='no_camera')
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.data.get('matter_entry_id')==entries[0].entry_id and entry.data.get('node_id')==node_id:
+                return self.async_abort(reason='already_configured')
+        client=get_matter(self.hass).matter_client
+        node=next((node for node in client.get_nodes() if node.node_id==node_id),None)
+        if node is None or not is_camera_candidate(node.node_data.attributes):
+            return self.async_abort(reason='no_camera')
+        wire=MatterWire(async_get_clientsession(self.hass),entries[0].data[CONF_URL])
+        try:
+            await wire.connect()
+            wire.require_camera_api()
+            live=await wire.request('read_attribute',node_id=node_id,attribute_path=PATHS)
+            unique=camera_identity(live) if isinstance(live,dict) else None
+            if unique is None:
+                return self.async_abort(reason='not_g2h_camera')
+        except MatterCameraCompatibilityError:
+            return self.async_abort(reason='camera_api_missing')
+        except (MatterCameraError,OSError,TimeoutError,ClientError):
+            return self.async_abort(reason='matter_read_failed')
+        finally:
+            await wire.close()
+        await self.async_set_unique_id(unique)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title='G2H Matter-camera',data={
+            'node_id':node_id,'unique_id':unique,'matter_entry_id':entries[0].entry_id})
+
     async def async_step_user(self,user_input=None):
         entries=self.hass.config_entries.async_loaded_entries('matter')
         if not entries:return self.async_abort(reason='matter_not_ready')
@@ -27,7 +61,7 @@ class ConfigFlow(config_entries.ConfigFlow,domain=DOMAIN):
         schema=getattr(info,'schema_version',None)
         # Export only bounded public troubleshooting metadata. No fabric IDs,
         # credentials, datasets, SDP, serials or unique IDs are written here.
-        diagnostic={'extension_version':'0.4.0','server_schema':schema,
+        diagnostic={'extension_version':'0.4.1','server_schema':schema,
           'server_sdk_version':str(getattr(info,'sdk_version','unknown'))[:80],
           'candidate_nodes':[{'node_id':n.node_id,'available':n.available,
             'product_name':n.node_data.attributes.get('0/40/3'),

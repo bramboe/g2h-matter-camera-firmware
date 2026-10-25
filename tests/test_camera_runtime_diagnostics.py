@@ -38,6 +38,7 @@ class RuntimeExport(unittest.IsolatedAsyncioTestCase):
         self.client=types.SimpleNamespace(read_attribute=AsyncMock(return_value=self.values))
         cause=ClientError('DO_NOT_EXPORT');error=ValueError('DO_NOT_EXPORT');error.__cause__=cause
         radio=types.SimpleNamespace(last_update_success=False,last_exception=error,closed=False,
+            poll_timing={'reads':3,'local_timeouts':1,'blocked_reads':2,'last_read_ms':True,'private':'DO_NOT_EXPORT'},
             data={'role':'router','channel':25,'children':0,'neighbors_table':'DO_NOT_EXPORT'})
         motion=types.SimpleNamespace(poll_timing={'reads':12,'expiries':1,'last_read_ms':25,'private':'DO_NOT_EXPORT','errors':False},last_update_success=True,last_exception=None,closed=False,fresh=False,
             data={'motion':False,'producer_enabled':False,'reason':'native-producer-disabled','sample_age_ms':100,'freshness_window_ms':2000})
@@ -51,6 +52,7 @@ class RuntimeExport(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result['cache_refresh']['attempted']);self.assertEqual(result['cache_refresh']['error_class'],'TimeoutError')
         self.assertEqual(result['official_client_core']['role'],'router');self.assertEqual(result['independent_wire_core']['role'],'router')
         self.assertEqual(result['radio']['error_class'],'ValueError');self.assertEqual(result['radio']['cause_class'],'ClientError')
+        self.assertEqual(result['radio']['poll_timing'],{'reads':3,'local_timeouts':1,'blocked_reads':2})
         self.assertEqual(result['radio']['table_lengths']['neighbors'],13);self.assertIsNone(result['motion']['motion'])
         self.assertNotIn('DO_NOT_EXPORT',json.dumps(result))
         self.assertEqual(result['motion']['poll_timing'],{'reads':12,'expiries':1,'last_read_ms':25})

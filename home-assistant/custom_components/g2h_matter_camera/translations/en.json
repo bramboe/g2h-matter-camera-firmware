@@ -19,7 +19,10 @@
     "abort": {
       "matter_not_ready": "Configure the Matter integration first.",
       "no_camera": "No already paired G2H Matter camera was found.",
-      "already_configured": "This camera is already configured."
+      "already_configured": "This camera is already configured.",
+      "camera_api_missing": "The Matter server reports API schema <12; camera signalling needs schema 12 or newer.",
+      "not_g2h_camera": "This Matter device is not the G2H Matter camera. Select the existing Linux camera, not the old radio pairing.",
+      "matter_read_failed": "Could not read the selected Matter camera. Check that it is available in the Matter integration."
     }
   }
 }

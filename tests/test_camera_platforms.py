@@ -119,6 +119,46 @@ class Platforms(unittest.IsolatedAsyncioTestCase):
         coordinator=sensor.RadioCoordinator(self.hass,self.entry);began=self.hass.loop.time();await coordinator.async_refresh()
         self.assertLess(self.hass.loop.time()-began,1.5);self.assertTrue(coordinator.last_update_success)
         self.assertEqual(coordinator.data['channel'],25)
+        await coordinator.close()
+    async def test_slow_radio_table_does_not_queue_other_tables_or_next_update(self):
+        p=telemetry.PATH;gate=asyncio.Event();core_reads=0
+        async def reply(node, paths):
+            nonlocal core_reads
+            if paths==[p+str(i) for i in (0,1,2)]:
+                core_reads+=1
+                return {p+'0':True,p+'1':'router' if core_reads==1 else 'child',p+'2':25}
+            if paths==[p+'11']:
+                await gate.wait();return {p+'11':'old table'}
+            return {p+'9':True,p+'10':2,p+'12':True,p+'13':0,p+'15':True,p+'16':3}
+        self.client.read_attribute.side_effect=reply
+        coordinator=sensor.RadioCoordinator(self.hass,self.entry)
+        original=coordinator._read
+        async def fast_bound(attributes,timeout):return await original(attributes,.02)
+        coordinator._read=fast_bound
+        try:
+            await coordinator.async_refresh()
+            self.assertTrue(coordinator.last_update_success);self.assertEqual(coordinator.data['role'],'router')
+            self.assertEqual(coordinator.data['neighbors'],2);self.assertIsNone(coordinator.data['neighbors_table'])
+            self.assertEqual(self.client.read_attribute.await_count,3)
+            self.assertEqual(coordinator.poll_timing['blocked_reads'],2)
+            pending=coordinator._pending_read
+            await coordinator.async_refresh()
+            self.assertFalse(coordinator.last_update_success)
+            self.assertEqual(self.client.read_attribute.await_count,3);self.assertFalse(pending.done())
+            gate.set();await pending
+            await coordinator.async_refresh()
+            self.assertTrue(coordinator.last_update_success);self.assertEqual(coordinator.data['role'],'child')
+            self.assertEqual(core_reads,2)
+        finally:await coordinator.close()
+    async def test_radio_unload_cancels_retained_remote_read(self):
+        gate=asyncio.Event()
+        async def pending(node,paths):await gate.wait()
+        self.client.read_attribute.side_effect=pending
+        coordinator=sensor.RadioCoordinator(self.hass,self.entry)
+        with self.assertRaises(TimeoutError):await coordinator._read((0,1,2),.01)
+        task=coordinator._pending_read;self.assertFalse(task.done())
+        await coordinator.close()
+        self.assertTrue(task.cancelled());self.assertIsNone(coordinator._pending_read)
     async def test_motion_false_real_then_locally_expires(self):
         p=diagnostics.MOTION_PATH;self.client.read_attribute.return_value={p+'0':True,p+'1':False,p+'2':True,
             p+'3':'native-held-motion',p+'5':10,p+'6':60}
@@ -233,6 +273,24 @@ class Platforms(unittest.IsolatedAsyncioTestCase):
         await coordinator.async_refresh()
         self.assertFalse(coordinator.fresh)
         self.assertEqual(coordinator.poll_timing['remaining_at_response_ms'],0)
+        self.assertIsNone(coordinator.data['motion']);self.assertEqual(coordinator.data['reason'],'sample-expired')
+        self.assertIsNone(coordinator.expiry);self.assertEqual(coordinator.poll_timing['expired_responses'],1)
+        notifications=coordinator.notifications
+        await asyncio.sleep(.01)
+        self.assertEqual(coordinator.notifications,notifications);self.assertEqual(coordinator.poll_timing['expiries'],0)
+        await coordinator.close()
+    async def test_late_reply_after_expiry_does_not_repeat_unavailable_notification(self):
+        p=diagnostics.MOTION_PATH;values={p+'0':True,p+'1':True,p+'2':True,p+'3':'native-held-motion',p+'5':0,p+'6':60}
+        self.client.read_attribute.return_value=values
+        coordinator=motion.MotionCoordinator(self.hass,self.entry);await coordinator.async_refresh()
+        async def delayed(node,paths):await asyncio.sleep(.10);return values
+        self.client.read_attribute.side_effect=delayed
+        before=coordinator.notifications
+        await coordinator.async_refresh()
+        self.assertFalse(coordinator.fresh);self.assertIsNone(coordinator.data['motion'])
+        self.assertIsNone(coordinator.expiry);self.assertEqual(coordinator.poll_timing['expiries'],1)
+        self.assertEqual(coordinator.poll_timing['expired_responses'],1)
+        self.assertEqual(coordinator.notifications,before+1)
         await coordinator.close()
     async def test_expiry_and_same_boolean_recovery_each_notify_once(self):
         p=diagnostics.MOTION_PATH;values={p+'0':True,p+'1':False,p+'2':True,p+'3':'native-held-motion',p+'5':10,p+'6':100}

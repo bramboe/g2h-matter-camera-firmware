@@ -1,5 +1,6 @@
 """Thread diagnostics on the existing camera's Matter device and fabric."""
 import asyncio
+from contextlib import suppress
 from datetime import timedelta
 import logging
 from homeassistant.components.sensor import SensorEntity
@@ -21,23 +22,62 @@ class RadioCoordinator(DataUpdateCoordinator):
                          update_interval=timedelta(seconds=30))
         self.entry = entry
         self.closed = False
+        self._pending_read = None
+        self._pending_started = None
+        self.poll_timing = {'reads':0,'local_timeouts':0,'blocked_reads':0}
     async def close(self):
         self.closed = True
         await self.async_shutdown()
+        pending = self._pending_read
+        self._pending_read = None
+        if pending is not None:
+            if not pending.done():
+                pending.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await pending
+    async def _read(self, attributes, timeout):
+        # A local timeout does not cancel the Matter server operation. Retain
+        # it so optional table reads cannot queue more operations behind it.
+        pending = self._pending_read
+        if pending is not None:
+            if not pending.done():
+                self.poll_timing['blocked_reads'] += 1
+                raise TimeoutError
+            # A reply from a previous update is not a current radio sample.
+            with suppress(asyncio.CancelledError, Exception):
+                await pending
+            self._pending_read = None
+        self._pending_started = self.hass.loop.time()
+        pending = asyncio.create_task(
+            read_cluster(self.hass, self.entry, CLUSTER, attributes, timeout=30),
+            name='G2H single Thread diagnostics read')
+        self._pending_read = pending
+        self.poll_timing['reads'] += 1
+        try:
+            return await asyncio.wait_for(asyncio.shield(pending), timeout)
+        except TimeoutError:
+            self.poll_timing['local_timeouts'] += 1
+            raise
+        finally:
+            elapsed = max(0, int((self.hass.loop.time()-self._pending_started)*1000))
+            self.poll_timing['last_read_ms'] = elapsed
+            self.poll_timing['max_read_ms'] = max(elapsed,self.poll_timing.get('max_read_ms',0))
+            if pending.done() and self._pending_read is pending:
+                self._pending_read = None
     async def _async_update_data(self):
         if self.closed:
             raise UpdateFailed('Thread coordinator stopped')
         try:
             # Core fields stay useful on older firmware and when a large table
             # cannot cross the server transport. Never wildcard the whole cluster.
-            values = await read_cluster(self.hass, self.entry, CLUSTER, (0,1,2), timeout=5)
+            values = await self._read((0,1,2), timeout=5)
             parse(values)
             try:
                 # Entire update: <=5 seconds for core +4 seconds optional budget.
                 async with asyncio.timeout(4):
                     ids = (9,10,12,13,15,16,18,19,20,21,22)
                     try:
-                        extra = await read_cluster(self.hass, self.entry, CLUSTER, ids, timeout=1)
+                        extra = await self._read(ids, timeout=1)
                         values.update({PATH+str(i):extra[PATH+str(i)] for i in ids if PATH+str(i) in extra})
                     except (ValueError, OSError, TimeoutError):
                         pass
@@ -45,7 +85,7 @@ class RadioCoordinator(DataUpdateCoordinator):
                         if values.get(PATH+str(fresh_id)) is not True:
                             continue
                         try:
-                            table = await read_cluster(self.hass, self.entry, CLUSTER, (table_id,), timeout=1)
+                            table = await self._read((table_id,), timeout=1)
                             if PATH+str(table_id) in table:
                                 values[PATH+str(table_id)] = table[PATH+str(table_id)]
                         except (ValueError, OSError, TimeoutError):

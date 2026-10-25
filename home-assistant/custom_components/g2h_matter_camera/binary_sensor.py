@@ -25,11 +25,24 @@ class MotionCoordinator(DataUpdateCoordinator):
         self._expiry_generation = 0
         self._precise_task = None
         self._precise_handle = None
-        self.poll_timing = {'reads':0,'expiries':0,'expired_during_read':0,'native_stale':0,'errors':0,'retained_on_error':0,'coalesced_waits':0}
+        self.poll_timing = {'reads':0,'expiries':0,'expired_during_read':0,'native_stale':0,'errors':0,'retained_on_error':0,'coalesced_waits':0,'expired_responses':0}
         self._read_started = None
         self._lease_retry_pending = False
         self._remote_read = None
         self._remote_started_at = None
+        self._last_visible_state = None
+    def async_update_listeners(self):
+        # The parent coordinator compares with its pre-read data. An expiry
+        # can publish while that read is in flight, so compare the actual
+        # entity-visible state as well before notifying listeners again.
+        data = self.data if isinstance(self.data,dict) else {}
+        available = bool(self.last_update_success and self.fresh)
+        visible = (available,data.get('motion') if available else None,
+                   data.get('producer_enabled'),data.get('reason'),data.get('freshness_window_ms'))
+        if visible == self._last_visible_state:
+            return
+        self._last_visible_state = visible
+        super().async_update_listeners()
     def _schedule_refresh(self):
         # HA 2026.10 rounds its standard coordinator schedule to whole seconds;
         # that can place a 500-ms interval in the past. Schedule relative to the
@@ -151,7 +164,14 @@ class MotionCoordinator(DataUpdateCoordinator):
                 delay = max(0, (self._window_ms-self._sample_age_ms)/1000-(received_at-self._received_at))
                 # A slow/disconnected next read must not keep the old motion
                 # state available beyond the radio's stated freshness window.
-                self.expiry = self.hass.loop.call_later(delay, self._expire)
+                if delay > 0:
+                    self.expiry = self.hass.loop.call_later(delay, self._expire)
+                else:
+                    # Never publish an already expired native value and then
+                    # expire it again on the next loop tick. That changes the
+                    # unavailable reason twice without a fresh observation.
+                    self.poll_timing['expired_responses'] += 1
+                    values.update({'motion':None,'producer_enabled':None,'reason':'sample-expired'})
             # An expiry may publish unavailable while this read is in flight.
             # HA compares against its pre-read data, so retain this transition
             # token to ensure even an unchanged boolean republishes recovery.

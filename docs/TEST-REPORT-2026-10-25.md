@@ -80,7 +80,8 @@ window were verified. The broker was never warm-stopped independently.
 
 ## Completed checks
 
-- 119 host tests passed; one optional real-codec test skipped in the default run.
+- At the earlier checkpoint, 119 host tests passed; one optional real-codec test
+  skipped. The current source suite has 140 passing tests and one optional skip.
 - Sanitized native observer regression passed, including the exact freshness
   boundary, executable/hash/permission guards and restart handling.
 - Both ARM observer/reporting tests linked with the production SDK and assertions
@@ -141,11 +142,66 @@ coalesced waits, 15 local read errors, one error retained within its valid lease
 two genuine sample expiries and no native stale samples. Queue prevention is
 active; these observations do not establish uninterrupted control availability.
 
+## Later speech and mute qualification
+
+A synthetic Dutch sentence was encoded as 223 Opus packets, using a normalized
+0.35 peak signal and unchanged native speaker volume. All packets reached the
+camera; the user confirmed that the complete sentence was clearly intelligible.
+Independent decoding produced 240 H.264 frames and 608 microphone Opus frames;
+no AAC decode errors were added. The temporary test fabric was removed, keeping
+the original three fabrics, unchanged host/native lifetime and fresh Thread.
+This qualifies intelligible talkback at that tested signal level. It does not
+establish calibrated loudness, uninterrupted full duplex or a HA talkback UI.
+
+A separate temporary standard Matter SpeakerMuted=true write was read back,
+then the same 223-packet speech was sent. Camera talk-received, published and
+playback-dispatch deltas all remained zero while video and microphone reception
+continued. SpeakerMuted=false was restored and verified; the temporary fabric
+was removed. This verifies the software delivery/playback barrier, not a
+separate acoustic measurement or native microphone capture-off.
+
+## Later stability failures
+
+A completed 604.5-second runtime observation collected 61 samples, including
+four Telnet timeouts. Ten successful full identity checks showed unchanged
+host/native lifetime, and successful status reads retained three fabrics and a
+fresh Thread router. However, the video session ended with peer-failed at about
+284 seconds and its video counters stopped growing. Browser currentTime kept
+advancing, so it cannot be used as proof that fresh frames continued arriving.
+A later snapshot decoded, but was not concurrent with an active video session.
+This is a completed runtime observation and a **failed continuous-video soak**.
+
+An independent CASE/WebRTC controller, without the HA browser, also failed its
+long-duration target after 1,979 decoded H.264 frames and 4,967 received Opus
+frames. Its connection reached ICE/DTLS/SRTP and decoding worked before the peer
+failed. Host/native lifetime and the three original fabrics were preserved,
+with no added AAC decode errors. This excludes a cause unique to HA's browser;
+it does not identify the underlying network or transport cause. No speculative
+firmware reconnect patch was deployed.
+
+## HA-only follow-up
+
+The Thread coordinator now retains a single remote read across local waits, so
+slow optional tables cannot accumulate more requests. A measured follow-up
+recorded three local radio timeouts and two blocked reads. Motion normalizes
+already-expired responses and deduplicates actual visible state delivery.
+Websocket closure now fails pending requests and releases the local busy video
+session, reporting a bounded reopen message. It does not implement transport
+reconnection or fix the long-duration failure above.
+
+The 0.4.1 extension adds [automatic attachment](AUTO-ATTACH.md) to the existing
+Matter pairing. Tests cover delayed startup, subsequent pairing, live identity
+verification, disabled/existing entries, unique-ID duplicates and shutdown.
+HA 2026.10.2 presents the extension and Matter as linked device pages, not one
+merged page. This source change adds no native HA Core camera support. Configuration
+validation and a HA restart passed; the installed observer completed three
+initial scans without failures or duplicate entries for the existing camera.
+Camera availability, fresh motion and Thread-router diagnostics recovered.
+
 ## Remaining qualification
 
-Mute behavior, speech intelligibility/level, extended soak, prolonged control-path stalls, interrupted
-updates/physical power-cut recovery, and a clean build on a second host remain
-unqualified. Clear HA microphone audio was user-confirmed on the earlier image;
-reverse-audio audibility is qualified only by the bounded tone test above, not
-by that microphone check. Global native capture-off remains
-unsupported, and this device is a Thread router rather than a Border Router.
+Uninterrupted video/control stability, calibrated talkback level, full duplex,
+interrupted updates/physical power-cut recovery, a fresh real-device automatic
+attachment, and a clean build on a second host remain unqualified. Global
+native capture-off remains unsupported. This device is a Thread router rather
+than a Border Router.

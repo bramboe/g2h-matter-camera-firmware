@@ -65,8 +65,10 @@ export G2H_IP=192.168.1.123   # your camera's IP
   advertisement; the HAP process still runs, and existing connections are
   not blocked).
 - **Home Assistant:** moving video was confirmed on HA 2026.10.2 with Matter
-  server schema 13 through the project custom integration. Native camera UI
-  support and other versions need separate qualification; see
+  server schema 13 through the project custom integration. Enable
+  [automatic attachment](docs/AUTO-ATTACH.md) once to avoid adding that extension
+  manually for each paired camera. HA still shows linked device pages for the
+  extension and Matter. Native camera UI support and other versions need separate qualification; see
   [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 - Hardware constraint: the camera binary may only be swapped **during a full boot**,
   never by killing the running camera process (the video hardware does not

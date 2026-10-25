@@ -17,6 +17,7 @@ stubs={
  'homeassistant.components.matter.helpers':module('homeassistant.components.matter.helpers',get_matter=lambda hass:hass.adapter),
  'homeassistant.exceptions':module('homeassistant.exceptions',ConfigEntryNotReady=NotReady),
  'homeassistant.helpers.aiohttp_client':module('homeassistant.helpers.aiohttp_client',async_get_clientsession=lambda hass:object()),
+ 'homeassistant.helpers':module('homeassistant.helpers',config_validation=types.SimpleNamespace(empty_config_schema=lambda domain:lambda config:config)),
  'matter_server.common.errors':module('matter_server.common.errors',NodeNotExists=MissingNode),
 }
 with patch.dict(sys.modules,stubs):

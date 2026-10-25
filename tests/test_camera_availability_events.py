@@ -67,4 +67,25 @@ class AvailabilityEvents(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(capture.await_count,2)
         self.assertFalse(capture.await_args_list[0].kwargs['prefer_large'])
         self.assertTrue(capture.await_args_list[1].kwargs['prefer_large'])
+    async def test_signalling_disconnect_releases_busy_session_and_reports_once(self):
+        self.entry.data['matter_entry_id']='matter'
+        self.hass.config_entries=types.SimpleNamespace(async_get_entry=lambda key:types.SimpleNamespace(data={'url':'ws://internal'}))
+        tasks=[]
+        def create(coroutine):
+            task=asyncio.create_task(coroutine);tasks.append(task);return task
+        self.hass.async_create_task=create
+        wire=types.SimpleNamespace(connect=AsyncMock(),close=AsyncMock(),request=AsyncMock(side_effect=[{'videoStreamID':1},{'webRTCSessionID':42},{}]))
+        callbacks=[]
+        def make_wire(session,url,event):callbacks.append(event);return wire
+        def field(value,name):return value[name]
+        send=Mock()
+        with patch.object(target,'MatterWire',side_effect=make_wire),patch.object(target,'field',side_effect=field),patch.object(target,'WebRTCError',side_effect=lambda code,message:(code,message)):
+            await self.entity.async_handle_async_webrtc_offer('synthetic-offer','browser-session',send)
+            self.assertIn('browser-session',self.entity.sessions)
+            callbacks[0]({'event_type':'connection_closed'})
+            callbacks[0]({'event_type':'connection_closed'})
+            self.assertEqual(self.entity.sessions,{})
+            send.assert_called_once();self.assertEqual(send.call_args.args[0][0],'matter_connection_closed')
+            await asyncio.gather(*tasks)
+        wire.close.assert_awaited_once()
 if __name__=='__main__':unittest.main()

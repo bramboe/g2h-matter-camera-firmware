@@ -69,6 +69,11 @@ class G2HMatterCamera(Camera):
             send_message(WebRTCError('matter_unavailable','Existing Matter integration is unavailable'));return
         record={'id':None,'events':[],'send':send_message,'closed':False,'candidates':[]}
         def event(data):
+            if record['closed']:return
+            if data.get('event_type')=='connection_closed':
+                try:send_message(WebRTCError('matter_connection_closed','Matter camera signalling connection was lost; reopen the live view'))
+                finally:self.close_webrtc_session(session_id)
+                return
             if data.get('node_id')!=self.entry.data['node_id'] or data.get('endpoint_id')!=1:return
             if record['id'] is None:
                 if len(record['events'])<16:record['events'].append(data)
@@ -80,8 +85,8 @@ class G2HMatterCamera(Camera):
                 for candidate in payload.get('ice_candidates',[]):
                     send_message(WebRTCCandidate(RTCIceCandidateInit.from_dict(candidate)))
             elif data.get('event_type')=='end':
-                send_message(WebRTCError('session_ended','Matter camera ended the video session'))
-                self.close_webrtc_session(session_id)
+                try:send_message(WebRTCError('session_ended','Matter camera ended the video session'))
+                finally:self.close_webrtc_session(session_id)
         wire=MatterWire(async_get_clientsession(self.hass),matter_entry.data[CONF_URL],event)
         record['wire']=wire;self.sessions[session_id]=record
         try:
@@ -98,7 +103,7 @@ class G2HMatterCamera(Camera):
             for candidate in record['candidates']:await self._candidate(record,candidate)
             record['candidates'].clear()
         except (MatterCameraError,OSError,TimeoutError,KeyError,ValueError,TypeError):
-            send_message(WebRTCError('matter_video_failed','Matter video negotiation failed; check the server camera API and H.264 support'))
+            if not record['closed']:send_message(WebRTCError('matter_video_failed','Matter video negotiation failed; check the server camera API and H.264 support'))
             self.sessions.pop(session_id,None);record['closed']=True;await self._stop(record)
     async def _candidate(self,record,candidate):
         # Older schema servers do not expose the provider convenience form for

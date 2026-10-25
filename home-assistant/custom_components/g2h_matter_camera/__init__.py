@@ -7,9 +7,18 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from matter_server.common.errors import NodeNotExists
 from homeassistant.const import CONF_URL
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import config_validation as cv
 from .protocol import MatterWire,MatterCameraError
 from .discovery import PATHS,camera_identity
 DOMAIN='g2h_matter_camera'
+CONFIG_SCHEMA=cv.empty_config_schema(DOMAIN)
+
+async def async_setup(hass,config):
+    """Enable automatic attachment without asking for a second pairing."""
+    from .auto_attach import start_auto_attach
+    start_auto_attach(hass)
+    return True
+
 async def async_setup_entry(hass,entry):
     try:
         adapter=get_matter(hass);client=adapter.matter_client

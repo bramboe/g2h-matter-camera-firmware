@@ -1,6 +1,6 @@
 # Native motion through the existing Matter pairing
 
-The unified `g2h_matter_camera` HA extension 0.4.0 adds a normal **Motion** binary
+The unified `g2h_matter_camera` HA extension 0.4.1 adds a normal **Motion** binary
 sensor to the same Matter device as the camera. It uses the existing Matter
 node and fabric. There is no second pairing, MQTT connection, RTSP analysis or
 new image-recognition workload. Existing camera and Thread entity identities
@@ -117,3 +117,17 @@ control-path interruption still correctly expired a sample. This is not a claim
 of uninterrupted control-path availability. Downloaded diagnostics contain bounded timing counters (read
 latency, expiry during a read, native stale samples and errors), never raw frames,
 process memory or credentials. See [the follow-up report](TEST-REPORT-2026-10-25.md).
+
+## Late responses and optional Thread reads
+
+An already-expired response is normalized directly to unavailable; it does not
+publish a transient valid reason followed by another expiry. Listener delivery
+compares the actual visible motion/availability/producer/reason state, including
+expiry delivered while a remote read was pending. Unchanged states do not
+produce another notification; expiry and fresh recovery still do.
+
+The Thread coordinator also retains one underlying remote read across local
+timeouts. A slow optional table cannot queue further tables or a new core read
+behind it. A later update discards its stale reply before requesting fresh core
+data. These protections limit queued work; they do not eliminate real network
+or control-path interruptions.

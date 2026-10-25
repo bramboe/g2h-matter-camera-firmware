@@ -92,5 +92,7 @@ the camera's SD card alone is not an independent recovery copy.
 `home-assistant/custom_components/g2h_matter_camera` includes the project camera
 extension and adds diagnostics/motion to that same existing device. Upgrade its
 files and restart/reload HA as appropriate; no new pairing or Thread dataset is
-required. See [THREAD.md](THREAD.md) and [IMPROVEMENTS.md](IMPROVEMENTS.md) for the
+required. Enable [automatic attachment](AUTO-ATTACH.md) to attach newly paired
+cameras without adding the extension manually. HA can still show linked device
+pages for the two integrations. See [THREAD.md](THREAD.md) and [IMPROVEMENTS.md](IMPROVEMENTS.md) for the
 scope and qualification of these candidates.
