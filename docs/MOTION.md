@@ -46,6 +46,11 @@ window, even if the following server request is slow or disconnected. Scheduled
 expiry and coordinator polling are stopped when the extension unloads; the
 shared official HA Matter client is never closed by this extension.
 
+The device reports state/producer/reason changes through Matter. Merely
+refreshing the sample timestamp does not dirty the age attribute or advance the
+cluster data version. Age is still encoded freshly on an explicit diagnostic
+read, and stale/failed producer transitions still report unavailable.
+
 Polling refreshes private timing information without publishing it as entity
 attributes. HA is notified only when meaningful motion/producer/status values
 change. An actual expiry publishes unavailable once; a fresh sample recovers
@@ -77,3 +82,14 @@ permission (camera active and not manually disabled). It does not, by itself,
 prove that the YUV detector is running or that a detection region is configured.
 A fresh clear sample is the native held flag; qualification must include an
 actual detected-to-clear transition. No native detector setting is changed.
+
+`tests/test_motion_reporting.cpp` also checks the real SDK cluster data version:
+steady motion with changing ages emits no change, while detection, expiry,
+recovery and a disabled producer each advance the version. Compile it against
+the production SDK with assertions enabled (`-UNDEBUG`). The ARM test was run
+on the camera without reading native process memory or altering camera state.
+
+Live qualification still observes occasional unavailable/recovered transitions
+under load at the strict two-second freshness deadline. These are distinct from
+unchanged-age notification churn. Do not present an expired sample as clear or
+claim this candidate has completed motion availability qualification.

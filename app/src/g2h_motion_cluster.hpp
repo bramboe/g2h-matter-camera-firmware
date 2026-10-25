@@ -24,7 +24,9 @@ public:
             for(chip::AttributeId i=0;i<=3;++i)NotifyAttributeChanged(i);
             lastValue_=value;lastEnabled_=enabled;lastReason_=reason;
         }
-        if(s.sampledMs!=lastSample_){NotifyAttributeChanged(kSampleAgeMs);lastSample_=s.sampledMs;}
+        // Age is diagnostic and is encoded freshly on an explicit read. Making
+        // it dirty every second forces subscription traffic for unchanged motion.
+        // A stale/failed producer still changes Value/Reason above and reports.
     }
     CHIP_ERROR Attributes(const chip::app::ConcreteClusterPath &path,
         chip::ReadOnlyBufferBuilder<chip::app::DataModel::AttributeEntry> &builder)override{
@@ -61,6 +63,6 @@ private:
         // exception text, kernel path or captured memory dump.
         return s.reason;
     }
-    MotionState &state_;std::optional<bool> lastValue_,lastEnabled_;std::string lastReason_;std::uint64_t lastSample_=0;
+    MotionState &state_;std::optional<bool> lastValue_,lastEnabled_;std::string lastReason_;
 };
 }

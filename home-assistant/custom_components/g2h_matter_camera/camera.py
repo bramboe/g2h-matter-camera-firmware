@@ -22,7 +22,7 @@ class G2HMatterCamera(Camera):
     _attr_supported_features=CameraEntityFeature.STREAM
     _attr_should_poll=False
     def __init__(self,hass,entry):
-        super().__init__();self.hass=hass;self.entry=entry;self.sessions={};self._snapshot_lock=asyncio.Lock();self._snapshot_jpeg=None;self._snapshot_at=0
+        super().__init__();self.hass=hass;self.entry=entry;self.sessions={};self._snapshot_lock=asyncio.Lock();self._snapshot_jpeg=None;self._snapshot_at=0;self._snapshot_preference=None
         self.runtime=hass.data[DOMAIN][entry.entry_id]
         self._attr_unique_id=entry.data['unique_id']+'-camera'
         self._attr_device_info=DeviceInfo(identifiers={get_node_device_identifier(self.runtime['client'].server_info,entry.data['node_id'])})
@@ -43,8 +43,9 @@ class G2HMatterCamera(Camera):
     def available(self):return self.runtime['node'].available
     async def async_camera_image(self,width=None,height=None):
         if not self.available:return None
+        prefer_large=(width is None and height is None) or (width is not None and width>320) or (height is not None and height>180)
         async with self._snapshot_lock:
-            if self._snapshot_jpeg is not None and self.hass.loop.time()-self._snapshot_at<3:return self._snapshot_jpeg
+            if self._snapshot_jpeg is not None and self._snapshot_preference==prefer_large and self.hass.loop.time()-self._snapshot_at<3:return self._snapshot_jpeg
             entry=self.hass.config_entries.async_get_entry(self.entry.data['matter_entry_id'])
             if entry is None:return None
             wire=MatterWire(async_get_clientsession(self.hass),entry.data[CONF_URL])
@@ -52,8 +53,8 @@ class G2HMatterCamera(Camera):
                 async with asyncio.timeout(12):
                     await wire.connect()
                     detail={'stage':'request'};self.runtime['snapshot']=detail
-                    image=await capture_snapshot(wire,self.entry.data['node_id'],diagnostics=detail)
-                self._snapshot_jpeg=image;self._snapshot_at=self.hass.loop.time();return image
+                    image=await capture_snapshot(wire,self.entry.data['node_id'],diagnostics=detail,prefer_large=prefer_large)
+                self._snapshot_jpeg=image;self._snapshot_preference=prefer_large;self._snapshot_at=self.hass.loop.time();return image
             except (MatterCameraError,OSError,TimeoutError,KeyError,ValueError,TypeError) as err:
                 self.runtime.setdefault('snapshot',{})['error_class']=type(err).__name__
                 return None

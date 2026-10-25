@@ -53,4 +53,18 @@ class AvailabilityEvents(unittest.IsolatedAsyncioTestCase):
         await self.entity.async_will_remove_from_hass()
         # HA Entity's normal removal lifecycle invokes async_on_remove hooks.
         self.entity.removers[0]();self.unsubscribe.assert_called_once()
+    async def test_thumbnail_cache_cannot_satisfy_a_larger_request(self):
+        self.runtime['node'].available=True
+        self.entry.data['matter_entry_id']='matter'
+        self.hass.config_entries=types.SimpleNamespace(async_get_entry=lambda key:types.SimpleNamespace(data={'url':'ws://internal'}))
+        wire=types.SimpleNamespace(connect=AsyncMock(),close=AsyncMock())
+        capture=AsyncMock(side_effect=[b'small',b'large'])
+        with patch.object(target,'MatterWire',return_value=wire),patch.object(target,'capture_snapshot',capture):
+            self.assertEqual(await self.entity.async_camera_image(width=320),b'small')
+            self.assertEqual(await self.entity.async_camera_image(width=320),b'small')
+            self.assertEqual(await self.entity.async_camera_image(width=512),b'large')
+            self.assertEqual(await self.entity.async_camera_image(width=512),b'large')
+        self.assertEqual(capture.await_count,2)
+        self.assertFalse(capture.await_args_list[0].kwargs['prefer_large'])
+        self.assertTrue(capture.await_args_list[1].kwargs['prefer_large'])
 if __name__=='__main__':unittest.main()
