@@ -1,10 +1,25 @@
-# Audio and Thread switches — source candidate
+# Audio and Thread controls — installed candidate
 
-The 0.5.0 source candidate implements two switches through the camera's existing
-Matter pairing. Neither the candidate firmware nor its HA extension has been
-installed or hardware-qualified for these controls yet. The last known installed
-versions are the previously tested 0.4.0 app and 0.4.1 HA extension; this work
-has not changed either device installation.
+The 0.5.1 candidate implements audio and Thread controls through the camera's
+existing Matter pairing. Both control paths passed guarded device off/on trials
+on 2026-10-26, retaining the three original fabrics and the running native camera
+and media broker. This establishes command/readback behavior, not acoustic
+privacy, reboot persistence or a stable-release qualification.
+
+The firmware also exposes standard **Mode Select** servers (cluster `0x0050`):
+endpoint 1 is **Camera audio**, endpoint 0 is **Thread radio**. Both advertise
+Disabled (0) and Enabled (1), with revision 2 and no standard semantic namespace.
+`ChangeToMode` queues the same existing workers; `CurrentMode` reports only the
+observed state and fails while unknown/pending. No plug/light device type or
+whole-camera power claim is introduced. HA's core Matter integration discovered
+these two labelled mode selectors automatically, without another pairing.
+
+The companion switches invoke this standard command and verify the vendor
+observations below. This matters for Matter(.js) Server 1.4.0: its
+[write handler](https://github.com/matter-js/matterjs-server/blob/v1.4.0/packages/ws-controller/src/controller/ControllerCommandHandler.ts#L947)
+rejects attributes absent from its cluster model, although generic reads work.
+The earlier vendor-only 0.5.0 write path therefore failed in HA without changing
+the native mute settings. No custom Matter-server build is required by 0.5.1.
 
 ## Geluid (audio)
 
@@ -51,7 +66,7 @@ See [THREAD.md](THREAD.md) for attributes 24–27 on endpoint 0/cluster
 
 ## Home Assistant
 
-The candidate extension adds **Geluid** and **Thread** switches to its existing
+The 0.5.1 extension adds **Geluid** and **Thread** switches to its existing
 linked camera device, using the same Matter node and unique identity. It sends
 writes over the existing Matter client and waits for observed confirmation.
 Unavailable/unknown values are never displayed as a verified off state. After
@@ -79,29 +94,34 @@ See [VENDOR-MEDIA.md](engineering/VENDOR-MEDIA.md).
 
 ## Evidence and outstanding hardware work
 
-- Full host suite: 150 tests run, 149 passed, one optional codec test skipped.
+- Full host suite: 151 tests run, 150 passed, one optional codec test skipped.
 - Real local socket peer tests cover dishonest native setting acknowledgements,
   pending/failed readbacks and unchanged volume.
 - Pseudo-terminal tests cover Thread stop/down and up/start ordering, readback,
   UART contention, queued replacement and no default startup mutation.
 - Both worker tests also passed AddressSanitizer/UndefinedBehaviorSanitizer.
 - Candidate ARM app and pinned SDK build succeeded with firmware metadata
-  `0.5.0-controls-candidate`; this is an offline build, not a device trial.
+  `0.5.1-controls-candidate`; the exact image passed the guarded device trial.
 - HA fixtures verify existing identity reuse, scoped writes, missing capabilities,
   initial unknown preference, null/false distinction, pending/error and cleanup.
 
-Hardware testing/install is blocked by camera reachability. Required next:
-verify and back up the current image/host identity; qualify bounded mute/off/on
-and Thread stop/start under independent restoration guards; verify video,
-snapshots, clear audio, fabrics and dataset retention afterwards; then test
-explicit preference persistence across a normal full boot. Do not silently
-promote the source candidate or present these switches as installed.
+The native mute flags changed from 0/0 to 1/1 and back to 0/0; speaker volume
+remained 80. Thread was verified disabled, the camera's Matter control remained
+reachable over Wi-Fi, and it returned to router after enabling again. The
+temporary test fabric was removed, leaving the original three. A detached local
+restore guard was proven before mutation. Neither native camera nor broker was
+restarted. No dataset/key read or write was used for this trial.
+
+Physical microphone/speaker silence, native setting persistence and explicit
+Thread preference persistence across a normal full boot remain unqualified.
+The full-image-off control and the earlier long-duration media issue remain
+open. Do not promote this candidate to a stable privacy release.
 
 ## Exact offline image
 
-- App: 8,303,024 bytes, SHA-256
-  `771375428a0405b21649fba58e1a20e87da4c80f0ebcab817ec27377fd6bb7ed`.
+- App: 8,307,952 bytes, SHA-256
+  `8b8446afa8596a93f8d4477677ce2b27f9076fed1397a626ec39b0275a02c245`.
 - Broker is unchanged: SHA-256
   `5c1940064665258cb695f81e1279287316aece034331fed2e0930c8cca8e4399`.
-- These hashes identify a local source candidate, not a hardware-qualified
-  release or the current running app. The historical prebuilt is unchanged.
+- These hashes identify the installed source candidate, not a stable release.
+  The historical public prebuilt is unchanged.

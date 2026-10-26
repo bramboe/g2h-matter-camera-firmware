@@ -18,7 +18,8 @@ from . import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 AUDIO_PATH = f'1/{0xFFF1FC11}/3'
 THREAD_PATH = f'0/{0xFFF1FC10}/'
-PATHS = [AUDIO_PATH] + [THREAD_PATH + str(i) for i in (24, 25, 26, 27)]
+MODE_REVISION = {'audio': '1/80/65533', 'thread': '0/80/65533'}
+PATHS = [AUDIO_PATH] + [THREAD_PATH + str(i) for i in (24, 25, 26, 27)] + list(MODE_REVISION.values())
 NAMES = {'audio': 'Geluid', 'thread': 'Thread'}
 
 
@@ -29,7 +30,8 @@ def control_values(values):
     audio = values.get(AUDIO_PATH)
     requested, observed = (values.get(THREAD_PATH + str(i)) for i in (24, 25))
     pending, error = (values.get(THREAD_PATH + str(i)) for i in (26, 27))
-    thread_supported = all(THREAD_PATH + str(i) in values for i in (24, 25, 26, 27))
+    thread_supported = (values.get(MODE_REVISION['thread']) == 2
+                        and all(THREAD_PATH + str(i) in values for i in (24, 25, 26, 27)))
     # A later, fresh physical observation remains authoritative even when the
     # last command failed. Otherwise a sticky error would strand an unavailable
     # switch and prevent retrying it from the UI. Never echo the requested state.
@@ -39,7 +41,8 @@ def control_values(values):
                         '', 'uart-busy', 'uart-unavailable', 'uart-settings',
                         'command-failed', 'verification-failed'))
     return {
-        'audio': {'supported': AUDIO_PATH in values, 'state': audio if type(audio) is bool else None},
+        'audio': {'supported': AUDIO_PATH in values and values.get(MODE_REVISION['audio']) == 2,
+                  'state': audio if type(audio) is bool else None},
         'thread': {'supported': thread_supported, 'state': observed if thread_known else None,
                    'requested': requested if type(requested) is bool else None,
                    'pending': pending if type(pending) is bool else None,
@@ -124,8 +127,12 @@ class ControlsCoordinator(DataUpdateCoordinator):
         try:
             async with self._lock:
                 client = self._client()
-                path = AUDIO_PATH if key == 'audio' else THREAD_PATH + '24'
-                await self._rpc(lambda: client.write_attribute(self.entry.data['node_id'], path, enabled))
+                # Existing servers can read unknown vendor attributes but reject
+                # writing an unknown cluster model. Invoke standard Mode Select
+                # and keep the vendor observations as the independent readback.
+                await self._rpc(lambda: client.send_command('device_command',
+                    node_id=self.entry.data['node_id'], endpoint_id=1 if key == 'audio' else 0,
+                    cluster_id=80, command_name='ChangeToMode', payload={'newMode': int(enabled)}))
                 deadline = self.hass.loop.time() + self.verification_timeout
                 while True:
                     observed = await self._read()

@@ -10,6 +10,7 @@
 #include "g2h_motion_cluster.hpp"
 #include "g2h_motion_source.hpp"
 #include "g2h_image_cluster.hpp"
+#include "g2h_control_mode_cluster.hpp"
 #include "g2h_talkback.hpp"
 #include <AppMain.h>
 #include <Options.h>
@@ -33,6 +34,11 @@ bool persistentMode=false,trialMode=false,commissionTrial=false;
 volatile sig_atomic_t commissioningRequested=0;
 bool windowEverOpened=false;
 std::uint64_t sentFrames=0,sentAudio=0;
+bool SaveThreadPreference(bool enabled){
+    if(!persistentMode)return false;
+    const uint8_t value=enabled?1:0;
+    return DeviceLayer::PersistedStorage::KeyValueStoreMgr().Put("g2h-thread-enabled",&value,sizeof(value))==CHIP_NO_ERROR;
+}
 class CameraRuntime {
 public:
     CameraRuntime():video_({g2h::kVideoWidth,g2h::kVideoHeight,g2h::kVideoFps},[this]{return source_.Start();},[this]{source_.EnableFrames(false);},
@@ -60,11 +66,7 @@ public:
         bridge_.Attach(rtc_);
         provider_.Create(1,rtc_);
         auto &registry=CodegenDataModelProvider::Instance().Registry();
-        radioCluster_.Create(radio_,[](bool enabled){
-            if(!persistentMode)return false;
-            const uint8_t value=enabled?1:0;
-            return DeviceLayer::PersistedStorage::KeyValueStoreMgr().Put("g2h-thread-enabled",&value,sizeof(value))==CHIP_NO_ERROR;
-        });
+        radioCluster_.Create(radio_,SaveThreadPreference);
         ReturnErrorOnFailure(registry.Register(radioCluster_.Registration()));radioRegistered_=true;
         if(persistentMode){
             uint8_t enabled=0;size_t length=0;
@@ -81,6 +83,14 @@ public:
         ReturnErrorOnFailure(registry.Register(provider_.Registration()));providerRegistered_=true;
         imageCluster_.Create(vendor_,[this]{talk_.SetMuted(true);audio_.EnableFrames(false);});
         ReturnErrorOnFailure(registry.Register(imageCluster_.Registration()));imageRegistered_=true;
+        audioMode_.Create(1,"Camera audio",[this]()->std::optional<bool>{
+            auto value=vendor_.AudioMuted();return value?std::optional<bool>(!*value):std::nullopt;
+        },[this](bool enabled){talk_.SetMuted(true);audio_.EnableFrames(false);return vendor_.WriteAudioMuted(!enabled);});
+        ReturnErrorOnFailure(registry.Register(audioMode_.Registration()));audioModeRegistered_=true;
+        threadMode_.Create(0,"Thread radio",[this]()->std::optional<bool>{
+            auto control=radio_.ControlSnapshot();return control.pending?std::nullopt:control.observed;
+        },[this](bool enabled){return SaveThreadPreference(enabled)&&radio_.SetEnabled(enabled);});
+        ReturnErrorOnFailure(registry.Register(threadMode_.Registration()));threadModeRegistered_=true;
         rtc_.SetCluster(&provider_.Cluster());
         g2h::av::VideoSensorParamsStruct sensor{};sensor.sensorWidth=g2h::kVideoWidth;sensor.sensorHeight=g2h::kVideoHeight;sensor.maxFPS=g2h::kVideoFps;
         g2h::av::VideoResolutionStruct viewport{};viewport.width=g2h::kVideoWidth;viewport.height=g2h::kVideoHeight;
@@ -123,6 +133,8 @@ public:
         if(timer_)DeviceLayer::SystemLayer().CancelTimer(Tick,this);
         motion_.Stop();radio_.Stop();rtc_.Shutdown();bridge_.Stop();snapshots_.Stop();audio_.Stop();talk_.Stop();vendor_.Stop();source_.Stop();rtc_.SetCluster(nullptr);
         auto &registry=CodegenDataModelProvider::Instance().Registry();
+        if(audioModeRegistered_)(void)registry.Unregister(&audioMode_.Cluster());
+        if(threadModeRegistered_)(void)registry.Unregister(&threadMode_.Cluster());
         if(motionRegistered_){(void)registry.Unregister(&motionCluster_.Cluster());motionRegistered_=false;}
         if(radioRegistered_){(void)registry.Unregister(&radioCluster_.Cluster());radioRegistered_=false;}
         if(providerRegistered_){(void)registry.Unregister(&provider_.Cluster());providerRegistered_=false;}
@@ -181,6 +193,7 @@ private:
         auto &self=*static_cast<CameraRuntime*>(context);self.timer_=false;
         try{
             self.motionCluster_.Cluster().Refresh();
+            self.audioMode_.Cluster().Refresh();self.threadMode_.Cluster().Refresh();
             auto &window=Server::GetInstance().GetCommissioningWindowManager();
             if(commissioningRequested){
                 commissioningRequested=0;
@@ -222,7 +235,7 @@ private:
                     if(FILE *f=fdopen(fd,"w")){
                         auto radio=self.radio_.Snapshot();
                         auto motion=self.motion_.state.Snapshot();auto motionValue=motion.Value();
-                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.5.0-controls-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
+                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.5.1-controls-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
                             self.audio_.Stage(),self.audio_.Faulted()?"true":"false",self.rtc_.AudioReady()?"true":"false",
                             static_cast<unsigned long long>(sentAudio),static_cast<unsigned long long>(self.talk_.PlayedChunks()),
                             self.audio_.Channel(),static_cast<unsigned long long>(self.audio_.RtpPackets()),static_cast<unsigned long long>(self.audio_.AccessUnits()),
@@ -252,6 +265,8 @@ private:
     g2h::VendorControl vendor_;
     g2h::Talkback talk_{"/tmp/g2h-talkback"};
     LazyRegisteredServerCluster<g2h::ImageSettingsCluster> imageCluster_;
+    LazyRegisteredServerCluster<g2h::ControlModeCluster> audioMode_,threadMode_;
+    bool audioModeRegistered_=false,threadModeRegistered_=false;
     bool imageRegistered_=false,syncing_=false,sourceLost_=false;
     g2h::VideoDelegate video_;
     g2h::MatterSignaling bridge_;

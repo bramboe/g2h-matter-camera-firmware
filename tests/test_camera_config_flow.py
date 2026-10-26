@@ -101,7 +101,7 @@ class ConfigFlow(unittest.IsolatedAsyncioTestCase):
             with patch.object(target,'MatterWire',return_value=wire):result=await flow.async_step_user({'node_id':'73'})
             self.assertEqual(result['errors'],{'base':'matter_read_failed'});wire.close.assert_awaited_once()
             metadata=json.loads((Path(d)/'g2h_matter_camera_diagnostic.json').read_text())
-            self.assertEqual(metadata['extension_version'],'0.5.0')
+            self.assertEqual(metadata['extension_version'],'0.5.1')
             self.assertEqual(metadata['candidate_nodes'][0]['node_id'],73)
             self.assertNotIn('private socket details',json.dumps(result))
 if __name__=='__main__':unittest.main()

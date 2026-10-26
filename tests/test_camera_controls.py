@@ -36,7 +36,7 @@ with patch.dict(sys.modules, stubs):
 
 
 def values(audio=True, requested=True, observed=True, pending=False, error=''):
-    return {target.AUDIO_PATH: audio, **{target.THREAD_PATH + str(i): value
+    return {target.AUDIO_PATH: audio, **{path:2 for path in target.MODE_REVISION.values()}, **{target.THREAD_PATH + str(i): value
         for i, value in ((24, requested), (25, observed), (26, pending), (27, error))}}
 
 
@@ -44,7 +44,7 @@ class Controls(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.entry = types.SimpleNamespace(entry_id='camera', data={'node_id':73, 'unique_id':'persistent-camera'})
         self.client = types.SimpleNamespace(read_attribute=AsyncMock(return_value=values()),
-            write_attribute=AsyncMock(), server_info=object(), disconnect=AsyncMock())
+            send_command=AsyncMock(), write_attribute=AsyncMock(), server_info=object(), disconnect=AsyncMock())
         self.hass = types.SimpleNamespace(loop=asyncio.get_running_loop(),
             adapter=types.SimpleNamespace(matter_client=self.client),
             data={'g2h_matter_camera':{'camera':{'client':self.client}}})
@@ -95,13 +95,16 @@ class Controls(unittest.IsolatedAsyncioTestCase):
             return next(reads)
         self.client.read_attribute.side_effect = read
         await self.coordinator.set_enabled('thread',False)
-        self.client.write_attribute.assert_awaited_once_with(73,target.THREAD_PATH+'24',False)
+        self.client.send_command.assert_awaited_once_with('device_command',node_id=73,
+            endpoint_id=0,cluster_id=80,command_name='ChangeToMode',payload={'newMode':0})
+        self.client.write_attribute.assert_not_awaited()
         thread = target.CameraControlSwitch(self.coordinator,self.entry,'thread')
         self.assertTrue(thread.available);self.assertIs(thread.is_on,False)
         self.client.read_attribute.side_effect = None
         self.client.read_attribute.return_value = values(audio=False)
         await self.coordinator.set_enabled('audio',False)
-        self.assertEqual(self.client.write_attribute.await_args.args,(73,target.AUDIO_PATH,False))
+        self.assertEqual(self.client.send_command.await_args.kwargs,
+            dict(node_id=73,endpoint_id=1,cluster_id=80,command_name='ChangeToMode',payload={'newMode':0}))
 
     async def test_failed_transition_is_unavailable_without_optimistic_success(self):
         await self.coordinator.async_refresh()
@@ -127,7 +130,7 @@ class Controls(unittest.IsolatedAsyncioTestCase):
         await self.coordinator.async_refresh()
         self.assertEqual(self.client.read_attribute.await_count,before)
         with self.assertRaises(HomeAssistantError):await self.coordinator.set_enabled('audio',False)
-        self.client.write_attribute.assert_not_awaited()
+        self.client.send_command.assert_not_awaited()
         await self.coordinator.close();self.assertTrue(pending.cancelled())
         self.assertIsNone(self.coordinator._pending_rpc)
 
@@ -135,11 +138,19 @@ class Controls(unittest.IsolatedAsyncioTestCase):
         await self.coordinator.async_refresh()
         self.hass.adapter.matter_client=object()
         with self.assertRaises(HomeAssistantError):await self.coordinator.set_enabled('audio',False)
-        self.client.write_attribute.assert_not_awaited()
+        self.client.send_command.assert_not_awaited()
 
     async def test_audio_only_capability_does_not_create_thread_or_video_switch(self):
-        self.client.read_attribute.return_value={target.AUDIO_PATH:None}
+        self.client.read_attribute.return_value={target.AUDIO_PATH:None,target.MODE_REVISION['audio']:2}
         entities=[];await target.async_setup_entry(self.hass,self.entry,entities.extend)
         self.assertEqual([entity._attr_name for entity in entities],['Geluid'])
         self.assertFalse(entities[0].available);self.assertIsNone(entities[0].is_on)
         await entities[0].coordinator.close()
+
+    async def test_vendor_only_controls_without_standard_transport_are_not_offered(self):
+        old=values()
+        for path in target.MODE_REVISION.values():old.pop(path)
+        self.client.read_attribute.return_value=old
+        entities=[];await target.async_setup_entry(self.hass,self.entry,entities.extend)
+        self.assertEqual(entities,[])
+        await self.hass.data['g2h_matter_camera']['camera']['controls'].close()

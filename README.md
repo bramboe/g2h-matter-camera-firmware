@@ -81,9 +81,12 @@ snapshots, queued-audio mute fixes, and guarded slot updates are described in
 [IMPROVEMENTS.md](docs/IMPROVEMENTS.md). These source changes require hardware
 qualification; the historical prebuilt executable remains identified separately.
 
-The 0.5.0 [audio and Thread switch candidate](docs/CONTROLS.md) is built and
-offline-tested, but not installed or hardware-qualified. Full native image-off
-(including RTSP) remains unresolved and is not offered as a switch.
+The installed 0.5.1 [audio and Thread controls candidate](docs/CONTROLS.md)
+passed guarded device and HA off/on trials. Standard Matter mode selectors and
+the companion switches reuse the existing pairing. Physical acoustic silence,
+reboot persistence and extended stability remain unqualified. Full native
+image-off (including RTSP) remains unresolved and is not offered as a switch.
+See the [bounded device test report](docs/TEST-REPORT-2026-10-26.md).
 
 ## Source builds and release evidence
 

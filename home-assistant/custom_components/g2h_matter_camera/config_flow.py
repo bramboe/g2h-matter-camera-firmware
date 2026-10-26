@@ -61,7 +61,7 @@ class ConfigFlow(config_entries.ConfigFlow,domain=DOMAIN):
         schema=getattr(info,'schema_version',None)
         # Export only bounded public troubleshooting metadata. No fabric IDs,
         # credentials, datasets, SDP, serials or unique IDs are written here.
-        diagnostic={'extension_version':'0.5.0','server_schema':schema,
+        diagnostic={'extension_version':'0.5.1','server_schema':schema,
           'server_sdk_version':str(getattr(info,'sdk_version','unknown'))[:80],
           'candidate_nodes':[{'node_id':n.node_id,'available':n.available,
             'product_name':n.node_data.attributes.get('0/40/3'),
