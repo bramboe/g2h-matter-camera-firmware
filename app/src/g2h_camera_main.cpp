@@ -60,14 +60,26 @@ public:
         bridge_.Attach(rtc_);
         provider_.Create(1,rtc_);
         auto &registry=CodegenDataModelProvider::Instance().Registry();
-        radioCluster_.Create(radio_);
+        radioCluster_.Create(radio_,[](bool enabled){
+            if(!persistentMode)return false;
+            const uint8_t value=enabled?1:0;
+            return DeviceLayer::PersistedStorage::KeyValueStoreMgr().Put("g2h-thread-enabled",&value,sizeof(value))==CHIP_NO_ERROR;
+        });
         ReturnErrorOnFailure(registry.Register(radioCluster_.Registration()));radioRegistered_=true;
+        if(persistentMode){
+            uint8_t enabled=0;size_t length=0;
+            const auto result=DeviceLayer::PersistedStorage::KeyValueStoreMgr().Get("g2h-thread-enabled",&enabled,sizeof(enabled),&length);
+            if(result==CHIP_NO_ERROR){
+                VerifyOrReturnError(length==1&&enabled<=1,CHIP_ERROR_INCORRECT_STATE);
+                VerifyOrReturnError(radio_.SetEnabled(enabled!=0),CHIP_ERROR_INCORRECT_STATE);
+            }else if(result!=CHIP_ERROR_PERSISTED_STORAGE_VALUE_NOT_FOUND)return result;
+        }
         if(persistentMode||trialMode)radio_.Start();
         motionCluster_.Create(motion_.state);
         ReturnErrorOnFailure(registry.Register(motionCluster_.Registration()));motionRegistered_=true;
         if((persistentMode||trialMode)&&!motion_.Start())return CHIP_ERROR_NO_MEMORY;
         ReturnErrorOnFailure(registry.Register(provider_.Registration()));providerRegistered_=true;
-        imageCluster_.Create(vendor_);
+        imageCluster_.Create(vendor_,[this]{talk_.SetMuted(true);audio_.EnableFrames(false);});
         ReturnErrorOnFailure(registry.Register(imageCluster_.Registration()));imageRegistered_=true;
         rtc_.SetCluster(&provider_.Cluster());
         g2h::av::VideoSensorParamsStruct sensor{};sensor.sensorWidth=g2h::kVideoWidth;sensor.sensorHeight=g2h::kVideoHeight;sensor.maxFPS=g2h::kVideoFps;
@@ -99,7 +111,7 @@ public:
         ReturnErrorOnFailure(av_.Cluster().SetViewport(view));
         ReturnErrorOnFailure(av_.Cluster().SetCurrentFrameRate(20));
         ReturnErrorOnFailure(av_.Cluster().Init());
-        talk_.SetMuted(av_.Cluster().GetSpeakerMuted()||av_.Cluster().GetSoftLivestreamPrivacyModeEnabled());
+        talk_.SetMuted(av_.Cluster().GetSpeakerMuted()||av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()||vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
         video_.SetLivestreamPrivacy(av_.Cluster().GetSoftLivestreamPrivacyModeEnabled());
         for(std::size_t i=0;i<g2h::VendorControl::kCount;++i)SyncFromVendor(g2h::Vendor(i));
         syncing_=false;
@@ -126,11 +138,11 @@ private:
         else if(id==attr::StatusLightEnabled::Id)(void)vendor_.Write(g2h::Vendor::StatusLight,c.GetStatusLightEnabled()?1:0);
         else if(id==attr::HDRModeEnabled::Id)(void)vendor_.Write(g2h::Vendor::Wdr,c.GetHDRModeEnabled()?1:0);
         else if(id==attr::SpeakerVolumeLevel::Id)(void)vendor_.Write(g2h::Vendor::SpeakerVolume,(int(c.GetSpeakerVolumeLevel())*100+127)/254);
-        else if(id==attr::SpeakerMuted::Id)talk_.SetMuted(c.GetSpeakerMuted()||c.GetSoftLivestreamPrivacyModeEnabled());
+        else if(id==attr::SpeakerMuted::Id)talk_.SetMuted(c.GetSpeakerMuted()||c.GetSoftLivestreamPrivacyModeEnabled()||vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
         // App-level privacy: stop sending video/audio over Matter; vendor stream untouched.
         else if(id==attr::SoftLivestreamPrivacyModeEnabled::Id){
             video_.SetLivestreamPrivacy(c.GetSoftLivestreamPrivacyModeEnabled());
-            talk_.SetMuted(c.GetSpeakerMuted()||c.GetSoftLivestreamPrivacyModeEnabled());
+            talk_.SetMuted(c.GetSpeakerMuted()||c.GetSoftLivestreamPrivacyModeEnabled()||vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
         }
     }
     // Camera → Matter. Vendor night vision 0/1/2 equals TriStateAutoEnum Off/On/Auto (verified 2026-10-22).
@@ -150,7 +162,7 @@ private:
     g2h::WebRtcDelegate::Hooks Hooks(){
         g2h::WebRtcDelegate::Hooks hooks;
         hooks.encoderProfile=[this]{return source_.Profile();};
-        hooks.talkAllowed=[this]{return avRegistered_&&!av_.Cluster().GetSpeakerMuted()&&!av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()&&talk_.Start();};
+        hooks.talkAllowed=[this]{return avRegistered_&&!av_.Cluster().GetSpeakerMuted()&&!av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()&&vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)==0&&talk_.Start();};
         hooks.talk=[this](const std::uint8_t *opus,std::size_t size){talk_.PushOpus(opus,size);};
         hooks.ensurePolling=[this]{return bridge_.EnsurePolling();};
         hooks.signal=[this](const auto &target,const std::string &sdp,bool offer,std::function<void()> failed){
@@ -190,8 +202,9 @@ private:
             // Settings changed on the camera itself (HomeKit, Aqara app) since the last poll.
             const auto changed=self.vendor_.TakeChanges();
             for(std::size_t i=0;i<changed.size();++i)if(changed[i]){self.syncing_=true;self.SyncFromVendor(g2h::Vendor(i));self.syncing_=false;}
+            self.talk_.SetMuted(self.av_.Cluster().GetSpeakerMuted()||self.av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()||self.vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
             // MicrophoneMuted is honoured by sending no audio at all.
-            const bool audio=self.rtc_.AudioReady()&&!self.av_.Cluster().GetMicrophoneMuted();
+            const bool audio=self.rtc_.AudioReady()&&!self.av_.Cluster().GetMicrophoneMuted()&&self.vendor_.Value(g2h::Vendor::MicrophoneMuted).value_or(1)==0;
             self.audio_.EnableFrames(audio);
             g2h::AudioSource::Packet sound;
             for(unsigned n=0;audio&&n<8&&self.audio_.Pop(sound);++n)
@@ -209,7 +222,7 @@ private:
                     if(FILE *f=fdopen(fd,"w")){
                         auto radio=self.radio_.Snapshot();
                         auto motion=self.motion_.state.Snapshot();auto motionValue=motion.Value();
-                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.4.0-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
+                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.5.0-controls-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
                             self.audio_.Stage(),self.audio_.Faulted()?"true":"false",self.rtc_.AudioReady()?"true":"false",
                             static_cast<unsigned long long>(sentAudio),static_cast<unsigned long long>(self.talk_.PlayedChunks()),
                             self.audio_.Channel(),static_cast<unsigned long long>(self.audio_.RtpPackets()),static_cast<unsigned long long>(self.audio_.AccessUnits()),

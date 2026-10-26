@@ -22,12 +22,13 @@ would require an independently reviewed radio-firmware change.
 
 ## Firmware implementation
 
-The host polls the original seven identity/status commands, then the optional
+The host polls the original seven identity/status commands and `ifconfig`, then the optional
 read-only commands `neighbor table`, `child table`, `router table`, `counters mac`
 and `uptime ms`. Formats were checked against the repository's existing NXP
 OpenThread `src/cli/cli.cpp` implementations of those commands. The CLI command
-names themselves are read-only; no `reset`, configuration argument, key/dataset,
-GPIO, or flashing command is sent. UART parameters are restored after polling,
+names themselves are read-only. Explicit enable control, described below, is the
+only path that sends configuration commands. No `reset`, key/dataset, GPIO, or
+flashing command is sent. UART parameters are restored after each operation,
 and the existing cooperative UART lock remains in use.
 
 Each response needs its exact echoed command and final `Done`. Responses are
@@ -45,7 +46,7 @@ drops that interval and also rejects expired samples or uptime regression.
 
 ## Matter interface
 
-Vendor cluster `0xFFF1FC10`, endpoint 0, revision 2. Existing IDs 0–8 retain their
+Vendor cluster `0xFFF1FC10`, endpoint 0, revision 3. Existing IDs 0–23 retain their
 original types and behavior. These fields are appended:
 
 | ID | Type | Meaning |
@@ -57,9 +58,53 @@ original types and behavior. These fields are appended:
 | 19 / 20 / 21 | nullable uint64 (raw 32-bit values) | MAC TX total / RX total / TX retries |
 | 22 | nullable uint64 | Radio uptime in milliseconds |
 | 23 | uint16 | Freshness window in seconds (90) |
+| 24 | nullable boolean; writable boolean | Explicit requested Thread enabled preference; null until requested |
+| 25 | nullable boolean | Observed Thread enabled state, independently verified and fresh |
+| 26 | boolean | An explicit enable/disable request is pending |
+| 27 | string | Empty for no control error; otherwise a bounded local error category |
 
 Tables include radio addresses and mesh topology. Treat exported HA diagnostics
 as personal network metadata. They contain no network key or dataset.
+
+## Explicit Thread enable/disable control
+
+`ThreadRadio::SetEnabled(bool)` queues a request on the existing polling worker;
+it performs no UART I/O on the Matter event loop. Disabling sends `thread stop`
+and then `ifconfig down`. Enabling sends `ifconfig up` and then `thread start`.
+Both exact command acknowledgements and a subsequent `state`/`ifconfig` readback
+are required. Disabled means Thread state `disabled` **and** interface `down`;
+enabled means interface `up` and Thread state `detached`, `child`, `router` or
+`leader`. Enabled does not by itself mean attached to the mesh. Mixed, malformed,
+missing or expired observations are unknown, never silently off or on.
+
+The write response acknowledges a queued request, not physical success. Clients
+should display attribute 25 and consult pending/error attributes 26–27. An
+unsuccessful operation consumes that attempt and reports `uart-busy`,
+`uart-unavailable`, `uart-settings`, `command-failed` or `verification-failed`.
+It does not repeatedly replay a failed command during every telemetry poll.
+A new explicit request can retry. Latest queued requests win; a newer request
+arriving during an older operation remains pending.
+
+Construction and ordinary polling make no configuration change. The cluster
+accepts an optional `bool(bool)` persistence callback. If supplied, it must save
+an explicit preference before queuing the request; failure rejects the Matter
+write without touching the radio. The app owner can restore that saved preference
+using the same `SetEnabled` API before starting the worker. No callback means
+runtime-only control. No Thread dataset, commissioning state or radio firmware
+is erased or rewritten. Polling and control share the same in-process mutex,
+cooperative UART directory lock and serial-setting restoration. The Matter
+camera is still on the host's existing IP connection, so stopping this separate
+Thread mesh router is not a Matter fabric removal.
+
+Host validation includes a real PTY CLI peer for command order, verified
+disable/enable, partial failures, false acknowledgements, UART-lock contention,
+latest-request and in-flight replacement, and worker wakeup. These new control
+paths still require guarded physical-device validation before release. Run:
+
+```sh
+clang++ -std=c++17 -pthread -fsanitize=address,undefined tests/test_thread_control.cpp -o /tmp/g2h-thread-control-test
+/tmp/g2h-thread-control-test
+```
 
 ## Home Assistant: use the existing camera extension
 
@@ -83,7 +128,9 @@ the producer's stated freshness window.
 `g2h_thread_diagnostics` remains an alternative for users who only want Thread
 diagnostics. Do **not** install both components for the same device unless you
 intentionally want duplicate diagnostic entities. Both use HA's existing
-Matter client and never pair devices, alter routes or write to the radio.
+Matter client and never pair devices. The camera extension can request the
+explicit Thread enable control above; the diagnostics-only component remains
+read-only.
 
 ## Validation and limits
 

@@ -11,7 +11,7 @@ def module(name,**values):
     r=types.ModuleType(name);r.__dict__.update(values);return r
 class NotReady(Exception):pass
 class MissingNode(Exception):pass
-platform=types.SimpleNamespace(CAMERA='camera',SENSOR='sensor',BINARY_SENSOR='binary_sensor')
+platform=types.SimpleNamespace(CAMERA='camera',SENSOR='sensor',BINARY_SENSOR='binary_sensor',SWITCH='switch')
 stubs={
  'homeassistant.const':module('homeassistant.const',Platform=platform,CONF_URL='url'),
  'homeassistant.components.matter.helpers':module('homeassistant.components.matter.helpers',get_matter=lambda hass:hass.adapter),
@@ -31,16 +31,16 @@ class Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.modules=patch.dict(sys.modules,{'g2h_lifecycle_test':target,'g2h_lifecycle_test.diagnostics':diagnostic_stub})
         self.modules.start();self.addCleanup(self.modules.stop)
         self.entry=types.SimpleNamespace(entry_id='existing-camera',data={'matter_entry_id':'matter','node_id':73,'unique_id':'identity'})
-        self.radio=types.SimpleNamespace(close=AsyncMock());self.motion=types.SimpleNamespace(close=AsyncMock())
+        self.radio=types.SimpleNamespace(close=AsyncMock());self.motion=types.SimpleNamespace(close=AsyncMock());self.controls=types.SimpleNamespace(close=AsyncMock())
         self.client=types.SimpleNamespace(close=AsyncMock(),get_node=lambda node:object())
         self.entries=types.SimpleNamespace(async_unload_platforms=AsyncMock(return_value=True),async_forward_entry_setups=AsyncMock(),
              async_get_entry=lambda key:types.SimpleNamespace(data={'url':'ws://existing-matter.invalid/ws'}))
         self.hass=types.SimpleNamespace(config_entries=self.entries,adapter=types.SimpleNamespace(matter_client=self.client),
-            data={'g2h_matter_camera':{'existing-camera':{'radio':self.radio,'motion':self.motion,'client':self.client}}})
+            data={'g2h_matter_camera':{'existing-camera':{'radio':self.radio,'motion':self.motion,'controls':self.controls,'client':self.client}}})
     async def test_success_closes_own_coordinators_not_shared_client(self):
         self.assertTrue(await target.async_unload_entry(self.hass,self.entry))
-        self.entries.async_unload_platforms.assert_awaited_once_with(self.entry,['camera','sensor','binary_sensor'])
-        self.radio.close.assert_awaited_once();self.motion.close.assert_awaited_once();self.client.close.assert_not_awaited()
+        self.entries.async_unload_platforms.assert_awaited_once_with(self.entry,['camera','sensor','binary_sensor','switch'])
+        self.radio.close.assert_awaited_once();self.motion.close.assert_awaited_once();self.controls.close.assert_awaited_once();self.client.close.assert_not_awaited()
         self.assertNotIn('existing-camera',self.hass.data['g2h_matter_camera'])
     async def test_failed_platform_unload_keeps_existing_runtime(self):
         self.entries.async_unload_platforms.return_value=False
@@ -57,7 +57,7 @@ class Lifecycle(unittest.IsolatedAsyncioTestCase):
         wire=types.SimpleNamespace(connect=AsyncMock(),request=AsyncMock(return_value={}),close=AsyncMock())
         with patch.object(target,'MatterWire',return_value=wire),patch.object(target,'camera_identity',return_value='identity'):
             self.assertTrue(await target.async_setup_entry(self.hass,self.entry))
-        self.entries.async_forward_entry_setups.assert_awaited_once_with(self.entry,['camera','sensor','binary_sensor'])
+        self.entries.async_forward_entry_setups.assert_awaited_once_with(self.entry,['camera','sensor','binary_sensor','switch'])
         self.assertIs(self.hass.data['g2h_matter_camera']['existing-camera']['client'],self.client)
         self.client.close.assert_not_awaited()
     async def test_offline_verified_identity_refreshes_once(self):

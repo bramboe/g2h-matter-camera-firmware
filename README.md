@@ -81,6 +81,10 @@ snapshots, queued-audio mute fixes, and guarded slot updates are described in
 [IMPROVEMENTS.md](docs/IMPROVEMENTS.md). These source changes require hardware
 qualification; the historical prebuilt executable remains identified separately.
 
+The 0.5.0 [audio and Thread switch candidate](docs/CONTROLS.md) is built and
+offline-tested, but not installed or hardware-qualified. Full native image-off
+(including RTSP) remains unresolved and is not offered as a switch.
+
 ## Source builds and release evidence
 
 See [`docs/BUILD.md`](docs/BUILD.md) for pinned inputs, portable build stages,

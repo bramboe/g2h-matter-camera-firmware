@@ -42,12 +42,12 @@ int main(){
  // unsupported commands must not discard the seven core fields.
  int master=posix_openpt(O_RDWR|O_NOCTTY);assert(master>=0&&!grantpt(master)&&!unlockpt(master));
  std::string slave=ptsname(master),lock="/tmp/g2h-radio-telemetry-"+std::to_string(getpid());int keep=open(slave.c_str(),O_RDWR|O_NOCTTY);assert(keep>=0);
- std::map<std::string,std::string> v={{"state","router"},{"channel","25"},{"networkname","test-thread"},{"panid","0x421b"},{"extpanid","0123456789abcdef"},{"extaddr","fedcba9876543210"},{"rloc16","a400"}};
- std::thread emu([&]{std::string q;for(unsigned i=0;i<11;){char c;assert(read(master,&c,1)==1);if(c=='\r')continue;if(c!='\n'){q+=c;continue;}if(q.empty())continue;
+ std::map<std::string,std::string> v={{"state","router"},{"channel","25"},{"networkname","test-thread"},{"panid","0x421b"},{"extpanid","0123456789abcdef"},{"extaddr","fedcba9876543210"},{"rloc16","a400"},{"ifconfig","up"}};
+ std::thread emu([&]{std::string q;for(unsigned i=0;i<12;){char c;assert(read(master,&c,1)==1);if(c=='\r')continue;if(c!='\n'){q+=c;continue;}if(q.empty())continue;
   std::string payload=v.count(q)?v[q]+"\r\nDone":"Error 7: InvalidArgs";
   if(q=="neighbor table"){payload.clear();for(auto &line:n)payload+=line+"\r\n";payload+="Done";}
   std::string answer="old log\r\nDone\r\n> "+q+"\r\n"+payload+"\r\n> ";assert(write(master,answer.data(),answer.size())==ssize_t(answer.size()));q.clear();++i;}});
- ThreadRadio radio(slave,lock);assert(radio.PollOnce());auto s=radio.Snapshot();assert(s.Fresh()&&s.role=="router"&&s.neighbors.Fresh()&&s.neighbors.count==1&&!s.children.Fresh()&&!s.routers.Fresh()&&!s.counters.Fresh());emu.join();close(keep);close(master);
+ ThreadRadio radio(slave,lock);assert(radio.PollOnce());auto s=radio.Snapshot();assert(s.Fresh()&&s.role=="router"&&s.enabled&&*s.enabled&&s.neighbors.Fresh()&&s.neighbors.count==1&&!s.children.Fresh()&&!s.routers.Fresh()&&!s.counters.Fresh());emu.join();close(keep);close(master);
  // A truncated mandatory response must time out within the documented budget.
  master=posix_openpt(O_RDWR|O_NOCTTY);assert(master>=0&&!grantpt(master)&&!unlockpt(master));slave=ptsname(master);keep=open(slave.c_str(),O_RDWR|O_NOCTTY);assert(keep>=0);
  std::thread truncated([&]{char c;while(read(master,&c,1)==1&&c!='\n'){}std::string response="state\r\nrouter\r\n";assert(write(master,response.data(),response.size())==ssize_t(response.size()));});

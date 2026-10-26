@@ -8,5 +8,5 @@
 #define CHIP_DEVICE_CONFIG_DEVICE_NAME "Aqara G2H Thread & Matter Camera"
 
 // Project firmware metadata; vendor/product identity and fabric storage are unchanged.
-#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION 400
-#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION_STRING "0.4.0-candidate"
+#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION 500
+#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION_STRING "0.5.0-controls-candidate"

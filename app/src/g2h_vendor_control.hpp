@@ -19,9 +19,10 @@
 namespace g2h {
 // The vendor camera process's loopback debug server (127.0.0.1:101). A set goes
 // through the vendor's own range check, apply callback and persistence, exactly
-// as its other controllers use it. Verified on 2026-10-22 for the settings below.
+// as its other controllers use it. Original image/volume settings were verified
+// on 2026-10-22; new native mute settings still require audio-effect qualification.
 struct VendorSetting {const char *module,*name;int min,max;};
-enum class Vendor : std::size_t {NightVision,StatusLight,Osd,Wdr,Brightness,SpeakerVolume,Count};
+enum class Vendor : std::size_t {NightVision,StatusLight,Osd,Wdr,Brightness,SpeakerVolume,MicrophoneMuted,SpeakerMuted,Count};
 inline constexpr std::array<VendorSetting,std::size_t(Vendor::Count)> kVendorSettings{{
     {"gpio","nightvision",0,2}, // 0 off (colour), 1 on (IR), 2 auto
     {"gpio","led",0,1},
@@ -29,7 +30,10 @@ inline constexpr std::array<VendorSetting,std::size_t(Vendor::Count)> kVendorSet
     {"video","wdr",0,1},
     {"video","brightness",0,100},
     {"audio","out_vol",0,100},
+    {"audio","in_mute",0,1},
+    {"audio","out_mute",0,1},
 }};
+inline constexpr bool IsAudioMute(Vendor which){return which==Vendor::MicrophoneMuted||which==Vendor::SpeakerMuted;}
 
 // 101 on the camera; host tests point it at a fake server.
 inline std::uint16_t vendorDebugPort=101;
@@ -96,13 +100,36 @@ public:
     }
     std::optional<int> Value(Vendor which) const {
         std::lock_guard<std::mutex> lock(mutex_);const auto i=std::size_t(which);
+        if(i>=kCount)return std::nullopt;
         return known_[i]?std::optional<int>(value_[i]):std::nullopt;
+    }
+    // Reports observed native settings, not the requested value or proof that
+    // physical audio capture/playback stopped. Mixed settings remain unknown.
+    std::optional<bool> AudioMuted() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto mic=std::size_t(Vendor::MicrophoneMuted),speaker=std::size_t(Vendor::SpeakerMuted);
+        if(!known_[mic]||!known_[speaker]||value_[mic]!=value_[speaker])return std::nullopt;
+        return value_[mic]!=0;
+    }
+    // Queue both halves under one lock without changing either volume. The
+    // vendor applies them separately; callers must gate their own media first.
+    bool WriteAudioMuted(bool muted){
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for(auto which:{Vendor::MicrophoneMuted,Vendor::SpeakerMuted}){
+                const auto i=std::size_t(which);pending_[i]=muted?1:0;hasPending_[i]=true;
+                known_[i]=false;changed_[i]=true;
+            }
+        }
+        cv_.notify_all();return true;
     }
     // Queue a write; the latest value per setting wins. Out of range is refused.
     bool Write(Vendor which,int value){
-        const auto i=std::size_t(which);const auto &s=kVendorSettings[i];
+        const auto i=std::size_t(which);if(i>=kCount)return false;const auto &s=kVendorSettings[i];
         if(value<s.min||value>s.max)return false;
-        {std::lock_guard<std::mutex> lock(mutex_);pending_[i]=value;hasPending_[i]=true;value_[i]=value;known_[i]=true;}
+        {std::lock_guard<std::mutex> lock(mutex_);pending_[i]=value;hasPending_[i]=true;
+            if(IsAudioMute(which)){known_[i]=false;changed_[i]=true;}
+            else{value_[i]=value;known_[i]=true;}}
         cv_.notify_all();return true;
     }
     // Settings whose vendor value changed outside Matter since the last call.
@@ -120,15 +147,30 @@ private:
             for(std::size_t i=0;i<kCount;++i){
                 if(!hasPending_[i])continue;
                 const int value=pending_[i];hasPending_[i]=false;
-                lock.unlock();const bool ok=VendorSet(kVendorSettings[i],value);lock.lock();
-                if(!ok){known_[i]=false;changed_[i]=true;} // re-read at the next poll
+                lock.unlock();const bool ok=VendorSet(kVendorSettings[i],value);
+                // The native setter acknowledgement ignores driver failures.
+                // Read back mutes immediately; never publish a queued request
+                // as applied. Actual audio-effect validation is separate.
+                auto observed=IsAudioMute(Vendor(i))?VendorGet(kVendorSettings[i],std::chrono::seconds(1)):std::optional<int>{};
+                lock.lock();
+                if(IsAudioMute(Vendor(i))){
+                    if(!hasPending_[i]){
+                        known_[i]=ok&&observed&&*observed==value;
+                        if(known_[i])value_[i]=*observed;
+                        changed_[i]=true;
+                    }
+                }else if(!ok){known_[i]=false;changed_[i]=true;} // re-read at the next poll
             }
             if(std::chrono::steady_clock::now()<nextPoll)continue;
             nextPoll=std::chrono::steady_clock::now()+std::chrono::seconds(30);
             for(std::size_t i=0;i<kCount&&!stop_;++i){
                 if(hasPending_[i])continue;
                 lock.unlock();auto v=VendorGet(kVendorSettings[i],std::chrono::seconds(1));lock.lock();
-                if(!v||hasPending_[i])continue;
+                if(hasPending_[i])continue;
+                if(!v){
+                    if(IsAudioMute(Vendor(i))&&known_[i]){known_[i]=false;changed_[i]=true;}
+                    continue;
+                }
                 if(!known_[i]||value_[i]!=*v){value_[i]=*v;known_[i]=true;changed_[i]=true;}
             }
         }

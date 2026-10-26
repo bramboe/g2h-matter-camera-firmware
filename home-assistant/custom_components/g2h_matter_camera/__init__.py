@@ -55,13 +55,13 @@ async def async_setup_entry(hass,entry):
     available=getattr(node,'available',None)
     refresh['cached_node_available_after']=available if isinstance(available,bool) else None
     hass.data.setdefault(DOMAIN,{})[entry.entry_id]={'node':node,'client':client,'cache_refresh':refresh}
-    await hass.config_entries.async_forward_entry_setups(entry,[Platform.CAMERA,Platform.SENSOR,Platform.BINARY_SENSOR])
+    await hass.config_entries.async_forward_entry_setups(entry,[Platform.CAMERA,Platform.SENSOR,Platform.BINARY_SENSOR,Platform.SWITCH])
     return True
 async def async_unload_entry(hass,entry):
-    if await hass.config_entries.async_unload_platforms(entry,[Platform.CAMERA,Platform.SENSOR,Platform.BINARY_SENSOR]):
+    if await hass.config_entries.async_unload_platforms(entry,[Platform.CAMERA,Platform.SENSOR,Platform.BINARY_SENSOR,Platform.SWITCH]):
         runtime=hass.data[DOMAIN].pop(entry.entry_id,None)
         if runtime:
-            for name in ('radio','motion'):
+            for name in ('radio','motion','controls'):
                 if runtime.get(name):await runtime[name].close()
         return True
     return False
