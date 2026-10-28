@@ -86,8 +86,9 @@ reuses the existing Matter pairing. Full video off/on passed a bounded device
 trial: a clean boot suppresses native capture, recording and RTSP tasks; another
 boot restores decoded Matter video/audio. The explicit video preference persists
 at startup. Both video transitions briefly restart the camera. Audio and Thread
-remain separate controls. Physical acoustic silence, disabled Thread preference
-across reboot and extended stability remain unqualified. The historical public
+remain separate controls. Audio and Thread disabled preferences passed a
+full-boot trial; global OFF is reapplied after late native mute resets. Physical
+acoustic silence and extended stability remain unqualified. The historical public
 prebuilt is unchanged. See the [current device test report](docs/TEST-REPORT-2026-10-28.md).
 
 ## Source builds and release evidence

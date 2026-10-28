@@ -78,6 +78,7 @@ public:
             const auto result=DeviceLayer::PersistedStorage::KeyValueStoreMgr().Get("g2h-audio-enabled",&enabled,sizeof(enabled),&length);
             if(result==CHIP_NO_ERROR){
                 VerifyOrReturnError(length==1&&enabled<=1,CHIP_ERROR_INCORRECT_STATE);
+                audioPreference_=enabled!=0;
                 VerifyOrReturnError(vendor_.WriteAudioMuted(enabled==0),CHIP_ERROR_INCORRECT_STATE);
             }else if(result!=CHIP_ERROR_PERSISTED_STORAGE_VALUE_NOT_FOUND)return result;
         }
@@ -179,6 +180,7 @@ public:
 private:
     bool SetAudioEnabled(bool enabled){
         if(!SaveAudioPreference(enabled))return false;
+        audioPreference_=enabled;
         talk_.SetMuted(true);audio_.EnableFrames(false);
         return vendor_.WriteAudioMuted(!enabled);
     }
@@ -226,7 +228,7 @@ private:
     g2h::WebRtcDelegate::Hooks Hooks(){
         g2h::WebRtcDelegate::Hooks hooks;
         hooks.encoderProfile=[this]{return source_.Profile();};
-        hooks.talkAllowed=[this]{return avRegistered_&&!av_.Cluster().GetSpeakerMuted()&&!av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()&&vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)==0&&talk_.Start();};
+        hooks.talkAllowed=[this]{return audioPreference_!=std::optional<bool>(false)&&avRegistered_&&!av_.Cluster().GetSpeakerMuted()&&!av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()&&vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)==0&&talk_.Start();};
         hooks.talk=[this](const std::uint8_t *opus,std::size_t size){talk_.PushOpus(opus,size);};
         hooks.ensurePolling=[this]{return bridge_.EnsurePolling();};
         hooks.signal=[this](const auto &target,const std::string &sdp,bool offer,std::function<void()> failed){
@@ -269,9 +271,9 @@ private:
             // Settings changed on the camera itself (HomeKit, Aqara app) since the last poll.
             const auto changed=self.vendor_.TakeChanges();
             for(std::size_t i=0;i<changed.size();++i)if(changed[i]){self.syncing_=true;self.SyncFromVendor(g2h::Vendor(i));self.syncing_=false;}
-            self.talk_.SetMuted(self.av_.Cluster().GetSpeakerMuted()||self.av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()||self.vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
+            self.talk_.SetMuted(self.audioPreference_==std::optional<bool>(false)||self.av_.Cluster().GetSpeakerMuted()||self.av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()||self.vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
             // MicrophoneMuted is honoured by sending no audio at all.
-            const bool audio=self.rtc_.AudioReady()&&!self.av_.Cluster().GetMicrophoneMuted()&&self.vendor_.Value(g2h::Vendor::MicrophoneMuted).value_or(1)==0;
+            const bool audio=self.audioPreference_!=std::optional<bool>(false)&&self.rtc_.AudioReady()&&!self.av_.Cluster().GetMicrophoneMuted()&&self.vendor_.Value(g2h::Vendor::MicrophoneMuted).value_or(1)==0;
             self.audio_.EnableFrames(audio);
             g2h::AudioSource::Packet sound;
             for(unsigned n=0;audio&&n<8&&self.audio_.Pop(sound);++n)
@@ -316,6 +318,7 @@ private:
     g2h::VideoEndpoint videoEndpoint_;
     LazyRegisteredServerCluster<g2h::ControlModeCluster> videoMode_;
     bool videoModeRegistered_=false,captureRequested_=false,videoControlInstalled_=false;
+    std::optional<bool> audioPreference_;
     Clock::time_point captureReleaseAt_{};bool captureAllowed_=true;
     g2h::VideoSource source_;
     // Declared after source_ so it stops first; holds at most one JPEG.

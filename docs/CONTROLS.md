@@ -30,7 +30,11 @@ is known. Startup reads existing native settings without changing them unless an
 was saved by this app. The native mute flags themselves reset at boot; the
 0.5.3 app saves and reapplies that explicit preference from its existing KVS.
 Both standard Mode Select and the vendor global AudioEnabled write use it.
-Own audio delivery stays closed until native readback. Early native startup
+While OFF is selected, the worker rechecks native mutes every two seconds
+and reapplies them if late native initialization or another native actor resets
+them. A confirmed ON request releases that enforcement; later external mutes
+are then respected. Own microphone/talkback delivery remains blocked by the
+explicit OFF preference independently of native readback. Early native startup
 transients before this service runs have not been acoustically qualified.
 
 Per-stream Matter microphone/speaker mute and livestream privacy remain
@@ -93,8 +97,8 @@ An explicit requested preference is saved in the app KVS before queuing the
 command and is reapplied at startup. With no preference, startup does not
 change the radio. The Matter app is controlled over Wi-Fi, so it remains
 reachable with Thread disabled. The guarded device trial verified off and
-return to router, retaining the original three fabrics. Explicit disabled
-preference persistence still needs separate reboot qualification.
+return to router, retaining the original three fabrics. The corrected candidate also passed a full-boot trial with the explicit
+disabled preference retained and Matter reachable over Wi-Fi.
 
 See [THREAD.md](THREAD.md) for unchanged observations 24–27 on endpoint 0,
 cluster `0xFFF1FC10`, revision 3. This radio is a Thread mesh router; it is not

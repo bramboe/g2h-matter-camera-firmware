@@ -135,3 +135,44 @@ physical listening/stimulus test; that test remains open.
 All 179 host tests passed except one optional codec test skipped. The pinned
 SDK rebuilt successfully with metadata 0.5.3. Device installation and repeated
 post-fix reboot/stream observations are still pending.
+
+### Late native initialization reset
+
+The first 0.5.3 implementation saved/reapplied the choice once. The repeated
+boot trial still observed native flags 0/0 after the new image was verified
+as the running executable. This showed that one startup application was
+insufficient; the native initializer can reset an earlier acknowledgement.
+Both failed trials restored the original controls and removed their temporary
+fabrics. No radio/native image was flashed.
+
+The final source keeps global OFF authoritative: its worker verifies both
+native mutes every two seconds and reapplies contradictory or unknown values.
+A confirmed ON request releases enforcement, preserving later external mutes.
+Own microphone/talkback delivery is additionally blocked directly by the
+explicit OFF preference even if the native service resets its state.
+
+A real local peer regression simulates exactly that reset after a successful
+acknowledgement, checks remuting, unchanged volume, and release of enforcement
+after ON. It passes. The full suite again passed 179 tests with one optional
+codec skip. One sanitizer cancellation test hit its former 300 ms combined
+assertion under concurrent compilation; its isolated rerun passed. The host
+test now separately checks source faults and allows one second for scheduler
+and sanitizer teardown, still detecting an unbounded paused reader. Production
+video cancellation code was not changed by this test adjustment.
+
+Final candidate app SHA-256:
+`7eacb7af6f93b701aa1b3f306be0628c536f8983acdca8956b428c5dd23e4ab2`.
+Its device qualification follows below once complete.
+
+### Corrected cold-boot persistence passed
+
+The final 0.5.3 image above passed guarded installation with unchanged native
+process/host lifetime and the original three fabrics. A subsequent real full
+boot with both controls OFF then confirmed: native microphone mute=1, speaker
+mute=1, unchanged volume=80, fresh Thread disabled, and reachable Matter over
+Wi-Fi. Standard Mode Select state reads succeeded. The trial then restored
+both controls to ON. This is native-setting persistence evidence; the separate
+physical listening/stimulus test remains deferred by the user.
+
+Two longer post-reboot media/idle-reopen phases are running; their final
+counts and original-fabric cleanup will be recorded after completion.

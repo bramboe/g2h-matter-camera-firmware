@@ -124,6 +124,8 @@ public:
     bool WriteAudioMuted(bool muted){
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            audioTarget_=muted;++audioGeneration_;
+            nextAudioVerify_=std::chrono::steady_clock::now()+std::chrono::seconds(2);
             for(auto which:{Vendor::MicrophoneMuted,Vendor::SpeakerMuted}){
                 const auto i=std::size_t(which);pending_[i]=muted?1:0;hasPending_[i]=true;
                 known_[i]=false;changed_[i]=true;
@@ -152,7 +154,8 @@ private:
         auto nextPoll=std::chrono::steady_clock::now()+std::chrono::seconds(30);
         std::unique_lock<std::mutex> lock(mutex_);
         while(!stop_){
-            cv_.wait_until(lock,nextPoll,[&]{if(stop_)return true;for(bool p:hasPending_)if(p)return true;return false;});
+            const auto wake=audioTarget_&&nextAudioVerify_<nextPoll?nextAudioVerify_:nextPoll;
+            cv_.wait_until(lock,wake,[&]{if(stop_)return true;for(bool p:hasPending_)if(p)return true;return false;});
             if(stop_)break;
             for(std::size_t i=0;i<kCount;++i){
                 if(!hasPending_[i])continue;
@@ -171,6 +174,23 @@ private:
                     }
                 }else if(!ok){known_[i]=false;changed_[i]=true;} // re-read at the next poll
             }
+            const auto mic=std::size_t(Vendor::MicrophoneMuted),speaker=std::size_t(Vendor::SpeakerMuted);
+            // A confirmed ON request releases enforcement, allowing later
+            // external mutes. OFF remains authoritative across native resets.
+            if(audioTarget_==std::optional<bool>(false)&&known_[mic]&&known_[speaker]&&
+               value_[mic]==0&&value_[speaker]==0&&!hasPending_[mic]&&!hasPending_[speaker])audioTarget_.reset();
+            if(audioTarget_&&std::chrono::steady_clock::now()>=nextAudioVerify_){
+                const int target=*audioTarget_?1:0;const auto generation=audioGeneration_;
+                nextAudioVerify_=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+                for(auto i:{mic,speaker}){
+                    lock.unlock();auto observed=VendorGet(kVendorSettings[i],std::chrono::seconds(1));lock.lock();
+                    if(generation!=audioGeneration_)break;
+                    if(hasPending_[i])continue;
+                    if(!observed||*observed!=target){
+                        known_[i]=false;changed_[i]=true;pending_[i]=target;hasPending_[i]=true;
+                    }else if(!known_[i]||value_[i]!=*observed){known_[i]=true;value_[i]=*observed;changed_[i]=true;}
+                }
+            }
             if(std::chrono::steady_clock::now()<nextPoll)continue;
             nextPoll=std::chrono::steady_clock::now()+std::chrono::seconds(30);
             for(std::size_t i=0;i<kCount&&!stop_;++i){
@@ -181,6 +201,9 @@ private:
                     if(IsAudioMute(Vendor(i))&&known_[i]){known_[i]=false;changed_[i]=true;}
                     continue;
                 }
+                if(IsAudioMute(Vendor(i))&&audioTarget_==std::optional<bool>(true)&&*v!=1){
+                    known_[i]=false;changed_[i]=true;pending_[i]=1;hasPending_[i]=true;continue;
+                }
                 if(!known_[i]||value_[i]!=*v){value_[i]=*v;known_[i]=true;changed_[i]=true;}
             }
         }
@@ -189,6 +212,8 @@ private:
     std::condition_variable cv_;
     pthread_t thread_{};
     bool started_=false,stop_=false,videoSettingsAllowed_=true;
+    std::optional<bool> audioTarget_;std::uint64_t audioGeneration_=0;
+    std::chrono::steady_clock::time_point nextAudioVerify_{};
     std::array<int,kCount> value_{},pending_{};
     std::array<bool,kCount> known_{},hasPending_{},changed_{};
 };

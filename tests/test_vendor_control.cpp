@@ -76,6 +76,21 @@ int main(){
         assert(control.WriteAudioMuted(false));Until([&]{return control.AudioMuted()==false;});
         control.Stop();
     }
+    // Native boot initialization can reset already-acknowledged mutes.
+    // Keep global OFF enforced, but release enforcement after confirmed ON.
+    {
+        g2h::VendorControl control;control.ReadAll();
+        assert(control.WriteAudioMuted(true)&&control.Start());Until([&]{return control.AudioMuted()==true;});
+        const auto writes=server.sets.load();
+        {std::lock_guard<std::mutex> lock(server.mutex);server.values.at("audio in_mute")=0;server.values.at("audio out_mute")=0;}
+        Until([&]{return server.sets>=writes+2;});Until([&]{return control.AudioMuted()==true;});
+        {std::lock_guard<std::mutex> lock(server.mutex);assert(server.values.at("audio in_mute")==1&&server.values.at("audio out_mute")==1&&server.values.at("audio out_vol")==80);}
+        assert(control.WriteAudioMuted(false));Until([&]{return control.AudioMuted()==false;});
+        {std::lock_guard<std::mutex> lock(server.mutex);server.values.at("audio in_mute")=1;server.values.at("audio out_mute")=1;}
+        const auto onWrites=server.sets.load();std::this_thread::sleep_for(2200ms);
+        assert(server.sets==onWrites);control.Stop();
+        {std::lock_guard<std::mutex> lock(server.mutex);server.values.at("audio in_mute")=0;server.values.at("audio out_mute")=0;}
+    }
     // A success-shaped native acknowledgement without applying microphone mute
     // cannot be exposed as successful mute, even when speaker mute succeeds.
     {
