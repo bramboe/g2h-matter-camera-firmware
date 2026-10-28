@@ -88,11 +88,14 @@ the camera's SD card alone is not an independent recovery copy.
 
 ## Home Assistant
 
-[PAIRING.md](PAIRING.md) describes the existing Matter pairing. The source under
-`home-assistant/custom_components/g2h_matter_camera` includes the project camera
-extension and adds diagnostics/motion to that same existing device. Upgrade its
-files and restart/reload HA as appropriate; no new pairing or Thread dataset is
-required. Enable [automatic attachment](AUTO-ATTACH.md) to attach newly paired
-cameras without adding the extension manually. HA can still show linked device
-pages for the two integrations. See [THREAD.md](THREAD.md) and [IMPROVEMENTS.md](IMPROVEMENTS.md) for the
-scope and qualification of these candidates.
+Use the built-in Matter integration and Matter Server, then pair the camera
+once as described in [PAIRING.md](PAIRING.md). No project HA custom component is
+required for the standard audio/video/Thread Mode Select controls. See
+[NATIVE-HOME-ASSISTANT.md](NATIVE-HOME-ASSISTANT.md) for the available functions,
+media limitations and migration from the optional project extension.
+
+The source under `home-assistant/custom_components/g2h_matter_camera` is an
+optional compatibility extension for HA live video, audio, snapshots, talkback
+and additional motion/Thread diagnostics. It adds a linked device page and is
+not part of the native-only installation. [Automatic attachment](AUTO-ATTACH.md)
+applies only to that optional extension.

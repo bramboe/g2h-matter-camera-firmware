@@ -64,12 +64,13 @@ export G2H_IP=192.168.1.123   # your camera's IP
   Baseline 720p preserved; Thread router; HomeKit discovery disabled (no `_hap`
   advertisement; the HAP process still runs, and existing connections are
   not blocked).
-- **Home Assistant:** moving video was confirmed on HA 2026.10.2 with Matter
-  server schema 13 through the project custom integration. Enable
-  [automatic attachment](docs/AUTO-ATTACH.md) once to avoid adding that extension
-  manually for each paired camera. HA still shows linked device pages for the
-  extension and Matter. Native camera UI support and other versions need separate qualification; see
-  [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+- **Home Assistant, native-only (0.5.3 candidate):** use the standard Matter integration and
+  Matter Server. Standard audio, full-video and Thread controls are available
+  as Mode Select selections on the existing Matter device; no project custom
+  component is required. See [native setup](docs/NATIVE-HOME-ASSISTANT.md).
+  HA 2026.10.2 does not create a native Matter camera entity, so that setup has
+  no HA live view or disabled camera placeholder. The optional project extension
+  provides media and extra diagnostics, but adds a linked device page.
 - Hardware constraint: the camera binary may only be swapped **during a full boot**,
   never by killing the running camera process (the video hardware does not
   re‑initialise reliably otherwise). The tooling here follows that rule.

@@ -106,6 +106,17 @@ an IP border router.
 
 ## Home Assistant behavior
 
+The native-only setup needs no project extension: HA discovers the three
+standard Mode Select clusters as Enabled/Disabled selections on the same Matter
+device. Their names are Camera audio, Camera video (restart), and Thread radio.
+A successful command queues the operation; a displayed selection during a video
+reboot is not independent proof that capture has already stopped. Wait until the
+camera returns and its physical state can be observed. See
+[NATIVE-HOME-ASSISTANT.md](NATIVE-HOME-ASSISTANT.md).
+
+The following describes the **optional** companion extension, which adds linked
+entities and is not used in the native-only setup.
+
 Version 0.5.2 of the companion extension probes video capability separately.
 Older firmware continues to offer its supported audio/Thread controls; it does
 not acquire an ineffective video switch. After a video command the switch is

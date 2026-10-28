@@ -3,7 +3,9 @@
 The camera pairs as a single Matter device. You pair it once; video, snapshots,
 audio, talkback and controls then all run over that one pairing.
 
-Enable the [automatic HA attachment](AUTO-ATTACH.md) once before pairing.
+For the standard Home Assistant setup, use only its built-in Matter integration
+and Matter Server. No project custom component or automatic attachment is
+required. See [native Home Assistant setup](NATIVE-HOME-ASSISTANT.md).
 
 ## Steps
 
@@ -19,13 +21,23 @@ Enable the [automatic HA attachment](AUTO-ATTACH.md) once before pairing.
 
 ## Display in Home Assistant
 
-Moving video was confirmed on HA 2026.10.2 with Matter server schema 13 using
-the project's custom camera integration. The automatic attachment observer
-removes its separate manual addition step; the extension still needs to be
-installed. HA 2026.10.2 presents it and Matter as linked device pages. A paired node alone does not guarantee
-a camera entity in every controller. The exact native HA camera UI version is
-not qualified here. See [the evidence matrix](COMPATIBILITY.md); do not re-pair
-an already paired device merely because its camera entity is absent.
+The native-only setup keeps one Matter device page. On the qualified firmware,
+Home Assistant exposes standard Mode Select controls for audio, full video
+capture and the Thread radio. They are Enabled/Disabled selections, not custom
+switch entities. Video changes require a full camera reboot.
+
+HA 2026.10.2 has no native Matter camera platform in its discovery mapping, so
+it does not create a camera entity or a disabled camera placeholder. A firmware
+cannot insert an unsupported-feature banner into HA's UI. The firmware retains
+its Matter camera capabilities; this setup does not provide live video,
+snapshots, microphone playback or talkback in HA's UI.
+
+The project extension remains an **optional compatibility path** for those
+media functions and extra motion/Thread diagnostics. It uses the existing
+Matter pairing, but adds a separate linked device page. Do not install or enable
+[automatic attachment](AUTO-ATTACH.md) when the goal is one native Matter device
+without project integration code. Do not re-pair an existing camera merely
+because its camera entity is absent.
 
 ## Privacy
 

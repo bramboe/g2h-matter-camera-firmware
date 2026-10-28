@@ -1,4 +1,8 @@
-# Automatic Home Assistant attachment
+# Optional Home Assistant compatibility extension
+
+This is optional. For one native Matter device with no custom integration, use
+[NATIVE-HOME-ASSISTANT.md](NATIVE-HOME-ASSISTANT.md) instead and do not enable
+the observer below.
 
 Install the project extension once, enable the observer below, then pair the G2H
 through Home Assistant's normal **Add Matter device** flow. Within 30 seconds
