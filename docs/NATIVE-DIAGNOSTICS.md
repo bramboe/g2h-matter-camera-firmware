@@ -82,9 +82,14 @@ sample ages or unchanged samples do not increment the cluster data version.
   classified the Matter transport as Wi-Fi. No companion integration was added.
 - A further bounded 180-second observation retained healthy source/router
   state and RTSP DESCRIBE returned 200. Fresh clear motion was observed.
-  A physical detected-then-clear motion event was **not observed in this window**
-  and remains an acceptance item. Do not treat entity creation as proof of
-  motion detection accuracy or a completed movement test.
+  The initial unattended window did not include a physical motion event.
+- A subsequent attended movement test produced two detected-then-clear pairs
+  on the original native HA binary sensor. HA recorded Detected at 14:51:49
+  and Clear at 14:53:02, then Detected at 14:53:29 and Clear at 14:53:38
+  (Europe/Amsterdam). Camera-side fresh native observations independently
+  changed true to false. No synthetic events, producer-setting changes, new
+  pairing or companion integration were used. This qualifies that bounded
+  end-to-end event path, not general detection accuracy or a fixed clear delay.
 
 This remains a candidate, with no stable release or certification claim. For
 recovery use the guarded installer's verified previous application slot; no

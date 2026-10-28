@@ -3,7 +3,7 @@
 **Native-only default (0.5.4 candidate):** motion is exposed through standard
 Vision Occupancy Sensing on the existing camera endpoint and native HA Matter
 device. No G2H component is required. See [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md)
-for its different unknown-value/cache behavior and pending physical event test.
+for its different unknown-value/cache behavior and attended physical event test.
 The remaining sections describe the optional companion/vendor-cluster path;
 its unavailable-state guarantees do not establish native HA cache behavior.
 
