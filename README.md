@@ -88,7 +88,8 @@ boot restores decoded Matter video/audio. The explicit video preference persists
 at startup. Both video transitions briefly restart the camera. Audio and Thread
 remain separate controls. Audio and Thread disabled preferences passed a
 full-boot trial; global OFF is reapplied after late native mute resets. Physical
-acoustic silence and extended stability remain unqualified. The historical public
+acoustic silence remains unqualified. Two awake 7,200-frame sessions and idle
+reopening passed; broader long-term stability remains unqualified. The historical public
 prebuilt is unchanged. See the [current device test report](docs/TEST-REPORT-2026-10-28.md).
 
 ## Source builds and release evidence

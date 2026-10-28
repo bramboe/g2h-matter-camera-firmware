@@ -1,5 +1,11 @@
 # Video boot control candidate — 2026-10-28
 
+**Latest installed state:** app 0.5.3 (`7eacb7af…`), companion extension 0.5.2.
+Video OFF/ON and audio/Thread disabled cold-boot checks passed. Two awake
+7,200-frame sessions passed with idle reopening. Physical listening/stimulus
+qualification remains deferred by the user. Earlier entries below retain the
+failed-trial evidence and explain the final implementation.
+
 ## Build and app-only qualification
 
 The 0.5.2 candidate adds an optional standard Matter Mode Select control on
@@ -174,5 +180,61 @@ Wi-Fi. Standard Mode Select state reads succeeded. The trial then restored
 both controls to ON. This is native-setting persistence evidence; the separate
 physical listening/stimulus test remains deferred by the user.
 
-Two longer post-reboot media/idle-reopen phases are running; their final
-counts and original-fabric cleanup will be recorded after completion.
+The two longer post-reboot media/idle-reopen phases completed; final results
+and the separately identified Mac sleep interruption are recorded below.
+
+### Interrupted post-boot duration: Mac low-battery sleep
+
+The first corrected-image duration attempt decoded 5,310 frames and received
+13,105 Opus packets before its peer failed. The concurrent Telnet socket then
+reported macOS errno 49 (source address unavailable), and the test could not
+perform its planned cleanup over that socket. This was recorded as a failed
+trial, not a passing soak.
+
+The Mac power log establishes Low Power Sleep at 09:04:21 local time with
+battery=1%, followed by wake at 09:13:55 on power attachment/user activity.
+After reconnecting, the camera's boot/native process identity was unchanged.
+Only the leftover temporary fabric was removed, returning the original three;
+video remained on and Thread was router. The Mac subsequently reported AC
+power and charging. This explains this specific interrupted observation, not
+the historical failures for which equivalent power evidence is unavailable.
+
+The two stream/idle-reopen phases were repeated successfully under a test-scoped
+idle sleep assertion. No permanent Mac power setting was changed.
+
+### Final awake duration and idle-reopen results
+
+The final installed 0.5.3 candidate completed both requested 7,200-frame
+sessions, separated by a 45-second idle interval and normal reopening:
+
+| Phase | Elapsed | Actual decoded frame checksums | Received Opus packets | Result |
+| --- | --- | --- | --- | --- |
+| First continuous session | 366.4 s | 7,200 | 17,917 | Pass |
+| Reopen after idle | 367.1 s | 7,200 | 17,952 | Pass |
+
+Both CASE/ICE/DTLS/SRTP paths connected and FFmpeg decoded every requested
+frame with exit zero. No empty frame drops, native/host restart or status-read
+error occurred. The original three fabrics were restored after removing only
+the temporary controller; final status was healthy, Thread router and no active
+video session. No household video or audio file was saved.
+
+These observations cover more than twelve minutes of active receiving plus
+idle reopening on this network path. They do not prove broad long-term
+stability, identify the old 25 October failures or qualify physical acoustic
+silence. No matching Mac sleep transition was found around the earlier
+25 October 16:30–17:00 failure window, so today's low-battery explanation is
+not retroactively applied to that historical failure.
+
+### Muted microphone transport check passed
+
+With global audio OFF, a separate authenticated receiver completed encrypted
+signalling and decoded 120 video frames while receiving zero microphone Opus
+packets. The app's audio-sent counter delta was zero while its video-sent delta
+was 321. No test sound or talkback was sent. The receiver normally expects audio,
+so its non-success result while muted is intentional; the independently checked
+video, zero-audio and app-counter observations are this negative test's result.
+
+Global audio ON was restored. A subsequent ordinary 120-frame video/audio
+request passed, the host/native identity was unchanged, and the temporary
+fabric was removed, leaving the original three. This verifies the Matter
+microphone barrier, not physical acoustic silence or native RTSP audio samples.
