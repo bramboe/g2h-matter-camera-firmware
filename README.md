@@ -64,10 +64,12 @@ export G2H_IP=192.168.1.123   # your camera's IP
   Baseline 720p preserved; Thread router; HomeKit discovery disabled (no `_hap`
   advertisement; the HAP process still runs, and existing connections are
   not blocked).
-- **Home Assistant, native-only (0.5.3 candidate):** use the standard Matter integration and
+- **Home Assistant, native-only (0.5.4 candidate):** use the standard Matter integration and
   Matter Server. Standard audio, full-video and Thread controls are available
   as Mode Select selections on the existing Matter device; no project custom
-  component is required. See [native setup](docs/NATIVE-HOME-ASSISTANT.md).
+  component is required. Native motion and three Thread diagnostics also use
+  that same device. See [native setup](docs/NATIVE-HOME-ASSISTANT.md) and
+  [diagnostics, RTSP and qualification limits](docs/NATIVE-DIAGNOSTICS.md).
   HA 2026.10.4 does not create a native Matter camera entity, so that setup has
   no HA live view or disabled camera placeholder. The optional project extension
   provides media and extra diagnostics, but adds a linked device page.

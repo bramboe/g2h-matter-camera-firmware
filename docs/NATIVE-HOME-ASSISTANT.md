@@ -6,7 +6,7 @@ configuration is required for the standard controls described here.
 
 ## Scope
 
-The qualified camera runs the 0.5.3 candidate. The historical public prebuilt is
+The qualified camera runs the 0.5.4 native-diagnostics candidate. The historical public prebuilt is
 not replaced by these instructions; qualify the actual installed build first.
 
 | Function in HA 2026.10.4 | Native-only behavior |
@@ -16,7 +16,9 @@ not replaced by these instructions; qualify the actual installed build first.
 | Full video capture | Standard Mode Select: Camera video (restart), Disabled/Enabled |
 | Thread radio | Standard Mode Select: Thread radio, Disabled/Enabled |
 | Live view, snapshots, microphone playback, talkback | No native camera entity in this tested HA version |
-| Extra motion and Thread telemetry from the project extension | Not displayed by this native-only setup |
+| Motion | Native binary sensor; held image motion, not stationary presence |
+| Thread diagnostics | Native channel, network name and routing role sensors |
+| IP and RTSP path | Existing Matter info plus optional device label for `/14` |
 | Thread mesh routing | Continues independently of HA entities |
 
 The three controls are **select entities**, not on/off switch entities. They use
@@ -30,6 +32,9 @@ recording and RTSP at boot; both Off and On require a full camera reboot. It is
 not an instant shutter. See [CONTROLS.md](CONTROLS.md) for the measured guarantees
 and remaining acoustic/privacy qualification limits. Saved recordings are not
 deleted.
+
+See [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md) for the four native entities,
+their enable/display steps, partial compatibility model and motion-test limits.
 
 ## Install or migrate
 
@@ -81,7 +86,7 @@ use the Matter device's menu, Re-interview device, Start re-interview. This uses
 the existing pairing. The reason for the delayed subscription/cache refresh
 has not been isolated by this migration; no automatic-refresh fix is claimed.
 
-## Qualification on 2026-10-28
+## Native-only migration qualification on 2026-10-28 (0.5.3)
 
 With the project entry disabled and the automatic YAML loader removed, HA
 configuration validation and an HA restart succeeded. Native HA selections

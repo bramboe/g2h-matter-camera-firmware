@@ -1,5 +1,11 @@
 # Internal Thread-router diagnostics
 
+**Native-only default (0.5.4 candidate):** channel, network name and routing
+role are available on the existing HA Matter device with no G2H component.
+See [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md). The richer topology/counter
+entities described below require an optional companion and are not part of
+that native-only setup.
+
 The JN5189 remains a standalone Thread Full Thread Device. It routes inside its
 existing Thread mesh; the G2H Linux host is **not a Thread Border Router**. The
 camera and diagnostics share the existing Matter node and pairing. No MQTT,

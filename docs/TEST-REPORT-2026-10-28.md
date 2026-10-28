@@ -1,6 +1,10 @@
 # Video boot control candidate — 2026-10-28
 
-**Latest installed state:** app 0.5.3 (`7eacb7af…`), companion extension 0.5.2.
+**Latest installed state:** app 0.5.4 (`352cece3…`), native HA Matter only;
+the companion was removed. New diagnostics/motion evidence and its pending
+physical movement test are in [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md).
+The remainder records the earlier 0.5.3 (`7eacb7af…`) media/control trial with
+companion extension 0.5.2.
 Video OFF/ON and audio/Thread disabled cold-boot checks passed. Two awake
 7,200-frame sessions passed with idle reopening. Physical listening/stimulus
 qualification remains deferred by the user. Earlier entries below retain the

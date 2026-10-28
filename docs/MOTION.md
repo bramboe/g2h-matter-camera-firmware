@@ -1,5 +1,12 @@
 # Native motion through the existing Matter pairing
 
+**Native-only default (0.5.4 candidate):** motion is exposed through standard
+Vision Occupancy Sensing on the existing camera endpoint and native HA Matter
+device. No G2H component is required. See [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md)
+for its different unknown-value/cache behavior and pending physical event test.
+The remaining sections describe the optional companion/vendor-cluster path;
+its unavailable-state guarantees do not establish native HA cache behavior.
+
 The unified `g2h_matter_camera` HA extension 0.4.1 adds a normal **Motion** binary
 sensor to the same Matter device as the camera. It uses the existing Matter
 node and fabric. There is no second pairing, MQTT connection, RTSP analysis or
