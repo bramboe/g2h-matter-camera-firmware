@@ -1,4 +1,8 @@
-# Reproduction via the camera's own update path (self-cleaning app.bin)
+# Experimental packaging via the camera's own update path
+
+For compiling the application see [BUILD.md](BUILD.md). This document describes
+packaging, not a source build or a complete fresh-device installer. The network
+method in [INSTALL.md](INSTALL.md) is the established install route.
 
 At boot the camera installs an `app.bin` from `/customer/app.bin` (or
 `/ota/app.bin`) by itself, via `/etc/check_upgrade.sh`: unpack → `copy_files.sh` →
@@ -24,7 +28,7 @@ script `S96g2hmattercamera` is the one written by the install tooling
 (`install/g2h_camera_upgrade_live.py`); export a copy of it as `$INIT`.
 
 ```bash
-REPO=.            # path to this repository
+REPO="$(pwd)"     # absolute path to this repository, before changing directory
 INIT=/path/to/S96g2hmattercamera
 B=/tmp/g2h-appbin; rm -rf "$B"; mkdir -p "$B/payload"; cd "$B/payload"
 cp "$REPO/app/g2h-matter-camera" camera
@@ -38,7 +42,7 @@ mkdir -p /customer/g2h-matter-camera /mnt/config/g2h-matter-camera/state
 cp /tmp/upgrade/camera /customer/g2h-matter-camera/camera; chmod 755 /customer/g2h-matter-camera/camera
 cp /tmp/upgrade/S96g2hmattercamera /etc/init.d/S96g2hmattercamera; chmod 755 /etc/init.d/S96g2hmattercamera
 # Clean up the SD carrier (internal /customer/app.bin + /tmp/upgrade is done by check_upgrade.sh itself)
-rm -f /mnt/sdcard/g2h_app.bin /mnt/sdcard/app.bin 2>/dev/null || true
+rm -f /mnt/sdcard/g2h_app.bin 2>/dev/null || true
 sync
 EOF
 chmod 755 camera S96g2hmattercamera check_coor.sh copy_files.sh
@@ -47,8 +51,8 @@ tar -czf "$B/app.bin" .
 
 ## 2. Preconditions
 
-- A fresh/empty `/customer` (our binary is ~8 MB). On a camera where our app
-  already runs, use the network install (`INSTALL.md`), not this path.
+- Adequate verified free space in `/customer`; do not empty that partition.
+  On a camera where our app already runs, use the network install (`INSTALL.md`).
 - Still to provide per device (unique per camera, so not in app.bin):
   - `/mnt/config/g2h-matter-camera/identity` — the Matter identity.
   - `/mnt/config/g2h-matter-camera/enabled` — empty file to enable autostart.

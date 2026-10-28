@@ -23,9 +23,12 @@ a certified product.
 
 ## What does not work (yet) / is missing
 
-- **Display in Home Assistant** — HA renders Matter cameras only from HA 2026.11
-  with a Matter server of schema 14. After that the camera appears automatically
-  in the existing Matter device; no re-pairing needed.
+- **Display in Home Assistant** — the native-only setup uses one Matter device
+  with audio/video/Thread mode selections and no project HA extension. HA
+  2026.10.2 has no native Matter camera entity mapping, so camera media is absent
+  in that UI. The optional project extension supplies live video/media and extra
+  diagnostics on a linked device page. A newer server schema alone does not add
+  a HA camera platform. See [native setup](NATIVE-HOME-ASSISTANT.md).
 - **Image mirror/rotate** — no safe live setting; only a config key that requires
   restarting the camera program. Not built.
 - **Recording, global hard-privacy, Wi-Fi over Matter** — not applicable.

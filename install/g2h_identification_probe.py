@@ -27,7 +27,10 @@ class Telnet:
     def send(self, value):
         # Commands are short, including octal-encoded scripts (<16 KiB).
         data = value.encode().replace(b'\xff', b'\xff\xff')
-        deadline = time.monotonic() + 5
+        budget = getattr(self, "write_timeout", 5)
+        if not isinstance(budget, (int, float)) or not 1 <= budget <= 30:
+            raise ValueError("bounded Telnet write timeout required")
+        deadline = time.monotonic() + budget
         while data:
             left = deadline - time.monotonic()
             if left <= 0 or not select.select([], [self.sock], [], left)[1]:

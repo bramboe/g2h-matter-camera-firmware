@@ -3,6 +3,10 @@
 The camera pairs as a single Matter device. You pair it once; video, snapshots,
 audio, talkback and controls then all run over that one pairing.
 
+For the standard Home Assistant setup, use only its built-in Matter integration
+and Matter Server. No project custom component or automatic attachment is
+required. See [native Home Assistant setup](NATIVE-HOME-ASSISTANT.md).
+
 ## Steps
 
 1. On the camera, open a pairing window (900 s) with the provided install script,
@@ -17,9 +21,23 @@ audio, talkback and controls then all run over that one pairing.
 
 ## Display in Home Assistant
 
-Home Assistant renders Matter cameras only from **HA 2026.11** with a **Matter
-server of schema 14**. On an older HA no camera image appears yet; the pairing
-itself persists. Re-pairing afterward is not needed.
+The native-only setup keeps one Matter device page. On the qualified firmware,
+Home Assistant exposes standard Mode Select controls for audio, full video
+capture and the Thread radio. They are Enabled/Disabled selections, not custom
+switch entities. Video changes require a full camera reboot.
+
+HA 2026.10.4 has no native Matter camera platform in its discovery mapping, so
+it does not create a camera entity or a disabled camera placeholder. A firmware
+cannot insert an unsupported-feature banner into HA's UI. The firmware retains
+its Matter camera capabilities; this setup does not provide live video,
+snapshots, microphone playback or talkback in HA's UI.
+
+The project extension remains an **optional compatibility path** for those
+media functions and extra motion/Thread diagnostics. It uses the existing
+Matter pairing, but adds a separate linked device page. Do not install or enable
+[automatic attachment](AUTO-ATTACH.md) when the goal is one native Matter device
+without project integration code. Do not re-pair an existing camera merely
+because its camera entity is absent.
 
 ## Privacy
 
