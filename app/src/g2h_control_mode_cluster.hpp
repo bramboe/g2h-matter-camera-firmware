@@ -1,4 +1,5 @@
 #pragma once
+#include "g2h_language_catalog.hpp"
 #include <app/server-cluster/DefaultServerCluster.h>
 #include <app/AttributeValueEncoder.h>
 #include <clusters/ModeSelect/Commands.h>
@@ -20,8 +21,19 @@ public:
     using Observe=std::function<std::optional<bool>()>;
     using Request=std::function<bool(bool)>;
     ControlModeCluster(chip::EndpointId endpoint,const char *description,Observe observe,Request request):
-        DefaultServerCluster({endpoint,kId}),description_(description),observe_(std::move(observe)),request_(std::move(request)){}
-    void Refresh(){auto value=observe_();if(value!=last_){last_=value;NotifyAttributeChanged(3);}}
+        DefaultServerCluster({endpoint,kId}),endpoint_(endpoint),description_(description),observe_(std::move(observe)),request_(std::move(request)){}
+    const char *Description()const{
+        auto translated=language::ModeDescription(language::Current(),endpoint_);
+        return translated?translated:description_;
+    }
+    void Refresh(){
+        const auto value=observe_();const auto locale=language::Current();
+        if(locale!=lastLanguage_){
+            lastLanguage_=locale;
+            NotifyAttributeChanged(0);NotifyAttributeChanged(2);NotifyAttributeChanged(3);
+        }else if(value!=last_)NotifyAttributeChanged(3);
+        last_=value;
+    }
     CHIP_ERROR Attributes(const chip::app::ConcreteClusterPath &path,
         chip::ReadOnlyBufferBuilder<chip::app::DataModel::AttributeEntry> &builder)override{
         ReturnErrorOnFailure(DefaultServerCluster::Attributes(path,builder));
@@ -38,13 +50,14 @@ public:
         using namespace chip;const auto id=request.path.mAttributeId;
         if(id==app::Clusters::Globals::Attributes::FeatureMap::Id)return encoder.Encode<uint32_t>(0);
         if(id==app::Clusters::Globals::Attributes::ClusterRevision::Id)return encoder.Encode<uint16_t>(2);
-        if(id==0)return encoder.Encode(CharSpan::fromCharString(description_));
+        if(id==0)return encoder.Encode(CharSpan::fromCharString(Description()));
         if(id==1){app::DataModel::Nullable<uint16_t> value;return encoder.Encode(value);}
         if(id==2){
             using Mode=app::Clusters::ModeSelect::Structs::ModeOptionStruct::Type;
             std::array<Mode,2> modes{};
-            modes[0].label=CharSpan::fromCharString("Disabled");modes[0].mode=0;
-            modes[1].label=CharSpan::fromCharString("Enabled");modes[1].mode=1;
+            const auto locale=language::Current();
+            modes[0].label=CharSpan::fromCharString(language::ControlOption(locale,false));modes[0].mode=0;
+            modes[1].label=CharSpan::fromCharString(language::ControlOption(locale,true));modes[1].mode=1;
             return encoder.Encode(app::DataModel::List<const Mode>(modes.data(),modes.size()));
         }
         if(id==3){const auto value=observe_();if(value)return encoder.Encode<uint8_t>(*value?1:0);return Protocols::InteractionModel::Status::Failure;}
@@ -68,6 +81,7 @@ public:
         return Protocols::InteractionModel::Status::Success; // Queued; read actual state.
     }
 private:
-    const char *description_;Observe observe_;Request request_;std::optional<bool> last_;
+    chip::EndpointId endpoint_;const char *description_;Observe observe_;Request request_;std::optional<bool> last_;
+    language::Id lastLanguage_=language::Current();
 };
 }

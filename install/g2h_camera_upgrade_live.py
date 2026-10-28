@@ -162,10 +162,11 @@ def upgrade(session,image,broker,backup_root,storage='customer',qualify_seconds=
   session.run(INIT+' stop',timeout=20)
   session.run(INIT+' start',timeout=12)
   # Radio status can need a complete polling cycle after an app restart. Give
-  # startup its own allowance without shortening continuous qualification, and
+  # startup (including the first complete UART snapshot and identity checks)
+  # its own allowance without shortening continuous qualification, and
   # reserve at least 30 seconds before the independent 180-second rollback.
   qualification_started=time.monotonic()
-  deadline=min(qualification_started+qualify_seconds+75,guardian_started+150)
+  deadline=min(qualification_started+qualify_seconds+90,guardian_started+150)
   observations=record['qualification_observations']=[]
   stable_since=None
   last_status_tick=None;last_status_progress=qualification_started

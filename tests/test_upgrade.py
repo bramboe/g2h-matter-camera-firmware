@@ -287,6 +287,18 @@ class UpgradeTests(unittest.TestCase):
         self.assertTrue(record['qualification_observations'])
         self.assertTrue(record['rollback_requested'])
 
+    def test_full_initial_radio_poll_does_not_consume_continuous_window(self):
+        # Real first UART snapshots can take more than 75 s including identity
+        # checks. Keep every stable sample and the independent guardian margin.
+        def status(session):
+            return dict(self.status,thread_fresh=self.camera.selector==self.camera.old or self.clock.now>=84)
+        with patch.object(upgrade,'safe_status',status):
+            result=self.run_upgrade()
+        fresh=[r['elapsed_seconds'] for r in result['qualification_observations'] if r['status']['thread_fresh']]
+        self.assertGreaterEqual(fresh[-1]-fresh[0],15)
+        self.assertLess(self.clock.now,150)
+        self.assertTrue(result['verified'])
+
     def test_status_gap_restarts_continuous_qualification(self):
         def status(session):
             if self.camera.selector != self.camera.old and 10 <= self.clock.now < 20:

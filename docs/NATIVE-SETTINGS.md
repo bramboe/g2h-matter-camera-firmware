@@ -1,5 +1,9 @@
 # Native settings candidate 0.5.5
 
+**Later HA upgrade:** native camera live view was verified with this same app
+on Core 2026.11.0b0. See [NATIVE-CAMERA.md](NATIVE-CAMERA.md). The HA 2026.10.4
+limitations below describe the earlier settings qualification.
+
 The qualified installation uses one existing HA Matter device and pairing.
 There is no active G2H custom integration, MQTT connection, second device page
 or newly commissioned fabric. HA 2026.10.4 and the existing OHF Matter Server

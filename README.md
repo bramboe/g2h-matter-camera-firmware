@@ -74,9 +74,15 @@ export G2H_IP=192.168.1.123   # your camera's IP
   night vision, status lamp, date/time overlay and a volume slider on that same
   device, plus extra Thread attributes and a tested snapshot route in the
   existing Matter Server UI.
-  HA 2026.10.4 does not create a native Matter camera entity, so that setup has
-  no HA live view or disabled camera placeholder. The optional project extension
-  provides media and extra diagnostics, but adds a linked device page.
+  The [0.5.6 language candidate](docs/LANGUAGE.md) adds English/Dutch control
+  labels and matching private voice banks through one selector on that same
+  device. The selected Dutch bank survived an own-app restart; physical speech
+  listening remains deferred.
+  **HA 2026.11.0b0:** native 1280×720 camera playback was verified on this same
+  Matter device, without the project extension. See the exact
+  [native-camera qualification](docs/NATIVE-CAMERA.md), including the one-viewer
+  limit. HA 2026.10.4 previously lacked the native camera platform; the optional
+  historical extension adds a linked device page for those older installations.
 - Hardware constraint: the camera binary may only be swapped **during a full boot**,
   never by killing the running camera process (the video hardware does not
   re‑initialise reliably otherwise). The tooling here follows that rule.

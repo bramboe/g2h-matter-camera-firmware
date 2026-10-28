@@ -38,8 +38,11 @@ inline constexpr bool IsVideoSetting(Vendor which){return which==Vendor::NightVi
 
 // 101 on the camera; host tests point it at a fake server.
 inline std::uint16_t vendorDebugPort=101;
+inline std::timed_mutex vendorExchangeMutex;
 inline bool VendorExchange(const std::string &command,std::string &reply,std::chrono::milliseconds budget=std::chrono::seconds(4)){
     const auto until=std::chrono::steady_clock::now()+budget;
+    std::unique_lock<std::timed_mutex> serial(vendorExchangeMutex,std::defer_lock);
+    if(!serial.try_lock_until(until))return false;
     auto left=[&]{return int(std::chrono::duration_cast<std::chrono::milliseconds>(until-std::chrono::steady_clock::now()).count());};
     int fd=socket(AF_INET,SOCK_STREAM,0);if(fd<0)return false;
     (void)fcntl(fd,F_SETFD,FD_CLOEXEC);

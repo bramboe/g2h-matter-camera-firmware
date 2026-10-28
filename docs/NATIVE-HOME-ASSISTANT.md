@@ -4,7 +4,18 @@ Use Home Assistant's built-in Matter integration and its Matter Server. No
 project add-on, custom integration, MQTT connection, second setup code or RTSP
 configuration is required for the standard controls described here.
 
-## Scope
+## Current native camera result
+
+After upgrading HA to **2026.11.0b0**, native 1280×720 camera live view was
+verified on the same existing Matter device with app 0.5.5. No project companion
+component or additional pairing was needed. See [NATIVE-CAMERA.md](NATIVE-CAMERA.md)
+for the exact observations, one-WebRTC-viewer limit and beta-version scope.
+
+The [0.5.6 language candidate](LANGUAGE.md) adds Language / Taal (English and
+Nederlands) on that same device. Control names/options and the selected speech
+bank share the choice; no component or new pairing is added.
+
+## Historical scope on HA 2026.10.4
 
 The qualified camera runs the 0.5.5 native-settings candidate. The historical public prebuilt is
 not replaced by these instructions; qualify the actual installed build first.
@@ -69,7 +80,7 @@ No firmware replacement, radio flash, factory reset, dataset change or new
 pairing is required for this migration when the installed firmware already
 exposes the three standard clusters.
 
-## Unsupported-camera indication
+## Historical unsupported-camera indication
 
 HA 2026.10.4's Matter discovery mapping has no camera platform. Unsupported
 camera functionality is omitted; the firmware cannot force HA to create a
@@ -77,8 +88,9 @@ disabled camera entity or an unsupported-feature banner. An optional device
 note or label can explain the missing live view using HA's normal device-edit
 UI, without installing any project component. This is an HA-side annotation,
 not a firmware-advertised capability or an automatically generated warning.
-The qualified installation uses a normal HA device label to mark the missing
-Matter live-view support; a new installation must add that label itself.
+The old installation used a normal HA device label to mark missing live-view
+support. On the qualified 2026.11.0b0 upgrade this obsolete label assignment was
+removed and the device note updated; do not add it to that upgraded setup.
 
 ## Status after a video reboot
 

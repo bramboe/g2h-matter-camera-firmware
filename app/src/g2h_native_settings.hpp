@@ -35,10 +35,21 @@ public:
     using Observe=std::function<std::optional<int>()>;
     using Request=std::function<bool(int)>;
     SettingModeCluster(chip::EndpointId endpoint,const char *name,unsigned maximum,Observe observe,Request request):
-        DefaultServerCluster({endpoint,0x50}),name_(name),maximum_(maximum>2?2:maximum),observe_(std::move(observe)),request_(std::move(request)){}
+        DefaultServerCluster({endpoint,0x50}),endpoint_(endpoint),name_(name),maximum_(maximum>2?2:maximum),observe_(std::move(observe)),request_(std::move(request)){}
+    const char *Description()const{
+        auto translated=language::ModeDescription(language::Current(),endpoint_);
+        return translated?translated:name_;
+    }
     std::optional<int> Observed()const{auto v=observe_();return v&&*v>=0&&unsigned(*v)<=maximum_?v:std::nullopt;}
     bool RequestMode(unsigned value){return value<=maximum_&&request_(int(value));}
-    void Refresh(){auto v=Observed();if(v!=last_){last_=v;NotifyAttributeChanged(3);}}
+    void Refresh(){
+        const auto value=Observed();const auto locale=language::Current();
+        if(locale!=lastLanguage_){
+            lastLanguage_=locale;
+            NotifyAttributeChanged(0);NotifyAttributeChanged(2);NotifyAttributeChanged(3);
+        }else if(value!=last_)NotifyAttributeChanged(3);
+        last_=value;
+    }
     CHIP_ERROR Attributes(const chip::app::ConcreteClusterPath &p,chip::ReadOnlyBufferBuilder<chip::app::DataModel::AttributeEntry> &b)override{
         ReturnErrorOnFailure(DefaultServerCluster::Attributes(p,b));using E=chip::app::DataModel::AttributeEntry;
         static const std::array<E,4> e{{{0,{},chip::Access::Privilege::kView,std::nullopt},{1,{},chip::Access::Privilege::kView,std::nullopt},{2,{},chip::Access::Privilege::kView,std::nullopt},{3,{},chip::Access::Privilege::kView,std::nullopt}}};return b.AppendElements(chip::Span(e));
@@ -46,11 +57,11 @@ public:
     chip::app::DataModel::ActionReturnStatus ReadAttribute(const chip::app::DataModel::ReadAttributeRequest &r,chip::app::AttributeValueEncoder &e)override{
         using namespace chip;const auto id=r.path.mAttributeId;
         if(id==0xfffc)return e.Encode<uint32_t>(0);if(id==0xfffd)return e.Encode<uint16_t>(2);
-        if(id==0)return e.Encode(CharSpan::fromCharString(name_));
+        if(id==0)return e.Encode(CharSpan::fromCharString(Description()));
         if(id==1){app::DataModel::Nullable<uint16_t> v;return e.Encode(v);}
         if(id==2){using M=app::Clusters::ModeSelect::Structs::ModeOptionStruct::Type;std::array<M,3> modes{};
-            const char *labels[]={"Off","On","Automatic"};
-            for(unsigned n=0;n<=maximum_&&n<modes.size();++n){modes[n].mode=n;modes[n].label=CharSpan::fromCharString(labels[n]);}
+            const auto locale=language::Current();
+            for(unsigned n=0;n<=maximum_&&n<modes.size();++n){modes[n].mode=n;modes[n].label=CharSpan::fromCharString(language::SettingOption(locale,n));}
             return e.Encode(app::DataModel::List<const M>(modes.data(),maximum_+1));}
         if(id==3){auto v=Observed();if(v)return e.Encode<uint8_t>(*v);return Protocols::InteractionModel::Status::Failure;}
         return Protocols::InteractionModel::Status::UnsupportedAttribute;
@@ -64,7 +75,8 @@ public:
         return RequestMode(d.newMode)?Protocols::InteractionModel::Status::Success:Protocols::InteractionModel::Status::Failure;
     }
 private:
-    const char *name_;unsigned maximum_;Observe observe_;Request request_;std::optional<int> last_;
+    chip::EndpointId endpoint_;const char *name_;unsigned maximum_;Observe observe_;Request request_;std::optional<int> last_;
+    language::Id lastLanguage_=language::Current();
 };
 
 // Real camera loudspeaker component. A level change never releases either mute.
