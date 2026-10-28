@@ -139,9 +139,19 @@ public:
         if(value<s.min||value>s.max)return false;
         {std::lock_guard<std::mutex> lock(mutex_);
             if(IsVideoSetting(which)&&!videoSettingsAllowed_)return false;
-            pending_[i]=value;hasPending_[i]=true;
+            pending_[i]=value;hasPending_[i]=true;verifyPending_[i]=false;
             if(IsAudioMute(which)){known_[i]=false;changed_[i]=true;}
             else{value_[i]=value;known_[i]=true;}}
+        cv_.notify_all();return true;
+    }
+    // Native HA settings remain unknown until the worker reads the applied value.
+    bool WriteVerified(Vendor which,int value){
+        const auto i=std::size_t(which);if(i>=kCount)return false;const auto &s=kVendorSettings[i];
+        if(value<s.min||value>s.max)return false;
+        {std::lock_guard<std::mutex> lock(mutex_);
+            if(IsVideoSetting(which)&&!videoSettingsAllowed_)return false;
+            pending_[i]=value;hasPending_[i]=true;verifyPending_[i]=true;known_[i]=false;changed_[i]=true;
+        }
         cv_.notify_all();return true;
     }
     // Settings whose vendor value changed outside Matter since the last call.
@@ -159,14 +169,14 @@ private:
             if(stop_)break;
             for(std::size_t i=0;i<kCount;++i){
                 if(!hasPending_[i])continue;
-                const int value=pending_[i];hasPending_[i]=false;
+                const int value=pending_[i];const bool verify=verifyPending_[i]||IsAudioMute(Vendor(i));hasPending_[i]=false;verifyPending_[i]=false;
                 lock.unlock();const bool ok=VendorSet(kVendorSettings[i],value);
                 // The native setter acknowledgement ignores driver failures.
                 // Read back mutes immediately; never publish a queued request
                 // as applied. Actual audio-effect validation is separate.
-                auto observed=IsAudioMute(Vendor(i))?VendorGet(kVendorSettings[i],std::chrono::seconds(1)):std::optional<int>{};
+                auto observed=verify?VendorGet(kVendorSettings[i],std::chrono::seconds(1)):std::optional<int>{};
                 lock.lock();
-                if(IsAudioMute(Vendor(i))){
+                if(verify){
                     if(!hasPending_[i]){
                         known_[i]=ok&&observed&&*observed==value;
                         if(known_[i])value_[i]=*observed;
@@ -215,6 +225,6 @@ private:
     std::optional<bool> audioTarget_;std::uint64_t audioGeneration_=0;
     std::chrono::steady_clock::time_point nextAudioVerify_{};
     std::array<int,kCount> value_{},pending_{};
-    std::array<bool,kCount> known_{},hasPending_{},changed_{};
+    std::array<bool,kCount> known_{},hasPending_{},changed_{},verifyPending_{};
 };
 }

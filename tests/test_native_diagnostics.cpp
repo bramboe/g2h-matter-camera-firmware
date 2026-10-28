@@ -22,11 +22,11 @@ int main(){
     radio.Refresh();assert(radio.GetDataVersion(rp)==version);
     sample.valid=true;sample.sampled=std::chrono::steady_clock::now();
     sample.role="router";sample.channel=25;sample.network="fixture-thread";
-    radio.Refresh();assert(radio.GetDataVersion(rp)==version+3);version+=3;
+    radio.Refresh();assert(radio.GetDataVersion(rp)==version+5);version+=5;
     for(unsigned n=0;n<1000;++n){sample.sampled=std::chrono::steady_clock::now();radio.Refresh();}
     assert(radio.GetDataVersion(rp)==version); // New samples are not changed values.
     sample.sampled-=std::chrono::seconds(91);radio.Refresh();
-    assert(radio.GetDataVersion(rp)==version+3);version+=3;
+    assert(radio.GetDataVersion(rp)==version+5);version+=5;
     radio.Refresh();assert(radio.GetDataVersion(rp)==version);
     sample.valid=false;radio.Refresh();assert(radio.GetDataVersion(rp)==version);
     using R=g2h::NativeThreadDiagnostics;

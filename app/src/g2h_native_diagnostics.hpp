@@ -32,15 +32,21 @@ public:
         const auto s=observe_();
         auto now=std::make_tuple(s.Fresh(),s.role,s.channel,s.network);
         if(now!=last_){for(chip::AttributeId id=0;id<3;++id)NotifyAttributeChanged(id);last_=std::move(now);}
+        auto identity=std::make_tuple(s.Fresh(),s.panId,s.extendedPanId);
+        if(identity!=lastIdentity_){NotifyAttributeChanged(3);NotifyAttributeChanged(4);lastIdentity_=std::move(identity);}
+        auto counters=std::make_tuple(s.counters.Fresh(),s.counters.tx,s.counters.rx,s.counters.retry);
+        if(counters!=lastCounters_){for(auto id:{0x16u,0x21u,0x27u})NotifyAttributeChanged(id);lastCounters_=std::move(counters);}
     }
     CHIP_ERROR Attributes(const chip::app::ConcreteClusterPath &path,
         chip::ReadOnlyBufferBuilder<chip::app::DataModel::AttributeEntry> &builder)override{
         ReturnErrorOnFailure(DefaultServerCluster::Attributes(path,builder));
         using E=chip::app::DataModel::AttributeEntry;
-        static const std::array<E,3> entries{{
+        static const std::array<E,8> entries{{
             {0,{},chip::Access::Privilege::kView,std::nullopt},
             {1,{},chip::Access::Privilege::kView,std::nullopt},
-            {2,{},chip::Access::Privilege::kView,std::nullopt}}};
+            {2,{},chip::Access::Privilege::kView,std::nullopt},
+            {3,{},chip::Access::Privilege::kView,std::nullopt},{4,{},chip::Access::Privilege::kView,std::nullopt},
+            {0x16,{},chip::Access::Privilege::kView,std::nullopt},{0x21,{},chip::Access::Privilege::kView,std::nullopt},{0x27,{},chip::Access::Privilege::kView,std::nullopt}}};
         return builder.AppendElements(chip::Span(entries));
     }
     chip::app::DataModel::ActionReturnStatus ReadAttribute(const chip::app::DataModel::ReadAttributeRequest &request,
@@ -51,10 +57,15 @@ public:
         if(id==0){app::DataModel::Nullable<uint16_t> value;if(s.Fresh()&&s.channel>=11&&s.channel<=26)value.SetNonNull(uint16_t(s.channel));return encoder.Encode(value);}
         if(id==1){app::DataModel::Nullable<uint8_t> value;const auto role=RoutingRole(s.role);if(s.Fresh()&&role)value.SetNonNull(*role);return encoder.Encode(value);}
         if(id==2){app::DataModel::Nullable<CharSpan> value;if(s.Fresh()&&!s.network.empty()&&s.network.size()<=16)value.SetNonNull(CharSpan::fromCharString(s.network.c_str()));return encoder.Encode(value);}
+        if(id==3){app::DataModel::Nullable<uint16_t> value;if(s.Fresh()&&s.panId<=65535)value.SetNonNull(uint16_t(s.panId));return encoder.Encode(value);}
+        if(id==4){app::DataModel::Nullable<uint64_t> value;uint64_t n=0;if(s.Fresh()&&s.extendedPanId.size()==16&&RadioUnsigned(s.extendedPanId,UINT64_MAX,n,16))value.SetNonNull(n);return encoder.Encode(value);}
+        if(id==0x16||id==0x21||id==0x27){if(!s.counters.Fresh())return Protocols::InteractionModel::Status::Failure;return encoder.Encode<uint32_t>(id==0x16?s.counters.tx:id==0x21?s.counters.retry:s.counters.rx);}
         return Protocols::InteractionModel::Status::UnsupportedAttribute;
     }
 private:
     Observe observe_;std::tuple<bool,std::string,unsigned,std::string> last_{};
+    std::tuple<bool,unsigned,std::string> lastIdentity_{};
+    std::tuple<bool,uint32_t,uint32_t,uint32_t> lastCounters_{};
 };
 
 // Camera-derived motion, carried by standard vision Occupancy Sensing. It is a

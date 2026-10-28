@@ -76,6 +76,26 @@ int main(){
         assert(control.WriteAudioMuted(false));Until([&]{return control.AudioMuted()==false;});
         control.Stop();
     }
+    // A verified non-audio control must not publish the queued value, and must
+    // reject success-shaped acknowledgements when readback disagrees.
+    {
+        g2h::VendorControl control;control.ReadAll();
+        assert(control.WriteVerified(g2h::Vendor::SpeakerVolume,61));
+        assert(!control.Value(g2h::Vendor::SpeakerVolume));
+        assert(control.Start());Until([&]{return control.Value(g2h::Vendor::SpeakerVolume)==61;});
+        {std::lock_guard<std::mutex> lock(server.mutex);server.ignoreWrite="video osd";}
+        assert(control.WriteVerified(g2h::Vendor::Osd,0));
+        Until([&]{std::lock_guard<std::mutex> lock(server.mutex);return server.values.at("audio out_vol")==61;});
+        assert(!control.Value(g2h::Vendor::Osd));
+        control.SetVideoSettingsAllowed(false);
+        assert(!control.WriteVerified(g2h::Vendor::NightVision,0));
+        assert(!control.WriteVerified(g2h::Vendor::SpeakerVolume,101));
+        assert(!control.WriteVerified(g2h::Vendor::Count,0));
+        {std::lock_guard<std::mutex> lock(server.mutex);server.ignoreWrite.clear();}
+        assert(control.WriteVerified(g2h::Vendor::SpeakerVolume,80));Until([&]{return control.Value(g2h::Vendor::SpeakerVolume)==80;});
+        assert(!control.Value(g2h::Vendor::Osd)); // Worker completed the preceding dishonest setter/readback.
+        control.Stop();
+    }
     // Native boot initialization can reset already-acknowledged mutes.
     // Keep global OFF enforced, but release enforcement after confirmed ON.
     {

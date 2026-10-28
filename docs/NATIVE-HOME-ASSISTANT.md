@@ -6,7 +6,7 @@ configuration is required for the standard controls described here.
 
 ## Scope
 
-The qualified camera runs the 0.5.4 native-diagnostics candidate. The historical public prebuilt is
+The qualified camera runs the 0.5.5 native-settings candidate. The historical public prebuilt is
 not replaced by these instructions; qualify the actual installed build first.
 
 | Function in HA 2026.10.4 | Native-only behavior |
@@ -19,6 +19,9 @@ not replaced by these instructions; qualify the actual installed build first.
 | Motion | Native binary sensor; held image motion, not stationary presence |
 | Thread diagnostics | Native channel, network name and routing role sensors |
 | IP and RTSP path | Existing Matter info plus optional device label for `/14` |
+| WiFi signal and restart diagnostics | Native diagnostic entities |
+| Night vision, status lamp, time/date overlay | Native Mode Select controls |
+| Loudspeaker volume | Native 0–100% slider on the same device |
 | Thread mesh routing | Continues independently of HA entities |
 
 The three controls are **select entities**, not on/off switch entities. They use
@@ -35,6 +38,9 @@ deleted.
 
 See [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md) for the four native entities,
 their enable/display steps, partial compatibility model and motion-test limits.
+See [NATIVE-SETTINGS.md](NATIVE-SETTINGS.md) for the 0.5.5 controls, additional
+Thread diagnostic attributes and tested snapshot route through the existing
+Matter Server UI. This does not add a native HA camera-card entity.
 
 ## Install or migrate
 

@@ -1,9 +1,14 @@
 # Diagnostics and motion on one native Matter device
 
-The installed **0.5.4-native-diagnostics-candidate** adds four native entities to
+The **0.5.4-native-diagnostics-candidate** introduced four native entities on
 the existing Home Assistant Matter device. No G2H custom integration, MQTT
 connection, new pairing, additional device page or radio flash is required.
 The three audio/video/Thread Mode Select controls remain unchanged.
+
+The installed 0.5.5 candidate extends this model; see
+[NATIVE-SETTINGS.md](NATIVE-SETTINGS.md) for current controls, WiFi diagnostics,
+five extra Thread attributes and the existing Matter-server snapshot UI.
+The model and qualification below record the earlier 0.5.4 trial.
 
 | Information | Location in HA 2026.10.4 | Firmware source |
 | --- | --- | --- |

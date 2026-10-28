@@ -1,8 +1,9 @@
 # Video boot control candidate — 2026-10-28
 
-**Latest installed state:** app 0.5.4 (`352cece3…`), native HA Matter only;
-the companion was removed. New diagnostics/motion evidence, including the
-attended physical movement test, is in [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md).
+**Latest installed state:** app 0.5.5 (`3facc339…`), native HA Matter only;
+new settings/readback/snapshot qualification is recorded in
+[NATIVE-SETTINGS.md](NATIVE-SETTINGS.md). The companion was removed. Earlier 0.5.4
+diagnostics/motion evidence, including the attended physical movement test, is in [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md).
 The remainder records the earlier 0.5.3 (`7eacb7af…`) media/control trial with
 companion extension 0.5.2.
 Video OFF/ON and audio/Thread disabled cold-boot checks passed. Two awake

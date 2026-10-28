@@ -11,6 +11,7 @@
 #include "g2h_motion_cluster.hpp"
 #include "g2h_motion_source.hpp"
 #include "g2h_native_diagnostics.hpp"
+#include "g2h_native_settings.hpp"
 #include "g2h_image_cluster.hpp"
 #include "g2h_control_mode_cluster.hpp"
 #include "g2h_video_control.hpp"
@@ -135,6 +136,21 @@ public:
             });
             ReturnErrorOnFailure(registry.Register(videoMode_.Registration()));videoModeRegistered_=true;
         }
+        ReturnErrorOnFailure(nightEndpoint_.Register());
+        nightMode_.Create(3,"Night vision",2,[this]{return vendor_.Value(g2h::Vendor::NightVision);},[this](int v){return vendor_.WriteVerified(g2h::Vendor::NightVision,v);});
+        ReturnErrorOnFailure(registry.Register(nightMode_.Registration()));nightRegistered_=true;
+        ReturnErrorOnFailure(lightEndpoint_.Register());
+        lightMode_.Create(4,"Status light",1,[this]{return vendor_.Value(g2h::Vendor::StatusLight);},[this](int v){return vendor_.WriteVerified(g2h::Vendor::StatusLight,v);});
+        ReturnErrorOnFailure(registry.Register(lightMode_.Registration()));lightRegistered_=true;
+        ReturnErrorOnFailure(osdEndpoint_.Register());
+        osdMode_.Create(5,"Date and time overlay",1,[this]{return vendor_.Value(g2h::Vendor::Osd);},[this](int v){return vendor_.WriteVerified(g2h::Vendor::Osd,v);});
+        ReturnErrorOnFailure(registry.Register(osdMode_.Registration()));osdRegistered_=true;
+        ReturnErrorOnFailure(speakerEndpoint_.Register());
+        speakerLevel_.Create([this]{return vendor_.Value(g2h::Vendor::SpeakerVolume);},[this](int v){return vendor_.WriteVerified(g2h::Vendor::SpeakerVolume,v);});
+        ReturnErrorOnFailure(registry.Register(speakerLevel_.Registration()));speakerRegistered_=true;
+        wifiRssi_=ReadWifiSignal();
+        wifiSignal_.Create([this]{return wifiRssi_;});
+        ReturnErrorOnFailure(registry.Register(wifiSignal_.Registration()));wifiRegistered_=true;
         rtc_.SetCluster(&provider_.Cluster());
         g2h::av::VideoSensorParamsStruct sensor{};sensor.sensorWidth=g2h::kVideoWidth;sensor.sensorHeight=g2h::kVideoHeight;sensor.maxFPS=g2h::kVideoFps;
         g2h::av::VideoResolutionStruct viewport{};viewport.width=g2h::kVideoWidth;viewport.height=g2h::kVideoHeight;
@@ -182,6 +198,12 @@ public:
         if(videoModeRegistered_)(void)registry.Unregister(&videoMode_.Cluster());
         if(nativeMotionRegistered_)(void)registry.Unregister(&nativeMotion_.Cluster());
         if(nativeRadioRegistered_)(void)registry.Unregister(&nativeRadio_.Cluster());
+        if(nightRegistered_)(void)registry.Unregister(&nightMode_.Cluster());
+        if(lightRegistered_)(void)registry.Unregister(&lightMode_.Cluster());
+        if(osdRegistered_)(void)registry.Unregister(&osdMode_.Cluster());
+        if(speakerRegistered_)(void)registry.Unregister(&speakerLevel_.Cluster());
+        if(wifiRegistered_)(void)registry.Unregister(&wifiSignal_.Cluster());
+        nightEndpoint_.Clear();lightEndpoint_.Clear();osdEndpoint_.Clear();speakerEndpoint_.Clear();
         videoEndpoint_.Clear();
         if(motionRegistered_){(void)registry.Unregister(&motionCluster_.Cluster());motionRegistered_=false;}
         if(radioRegistered_){(void)registry.Unregister(&radioCluster_.Cluster());radioRegistered_=false;}
@@ -190,6 +212,14 @@ public:
         if(imageRegistered_){(void)registry.Unregister(&imageCluster_.Cluster());imageRegistered_=false;}
     }
 private:
+    static std::optional<int8_t> ReadWifiSignal(){
+        char state[8]{};int fd=open("/sys/class/net/wlan0/operstate",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);
+        if(fd<0)return {};const auto n=read(fd,state,sizeof(state));close(fd);
+        if(n<3||std::memcmp(state,"up\n",3))return {};
+        char data[4097];fd=open("/proc/net/wireless",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)return {};
+        const auto size=read(fd,data,sizeof(data));close(fd);if(size<=0||size>4096)return {};
+        return g2h::ParseWlanRssi(std::string(data,size));
+    }
     bool SetAudioEnabled(bool enabled){
         if(!SaveAudioPreference(enabled))return false;
         audioPreference_=enabled;
@@ -284,6 +314,8 @@ private:
             // Settings changed on the camera itself (HomeKit, Aqara app) since the last poll.
             const auto changed=self.vendor_.TakeChanges();
             for(std::size_t i=0;i<changed.size();++i)if(changed[i]){self.syncing_=true;self.SyncFromVendor(g2h::Vendor(i));self.syncing_=false;}
+            self.nightMode_.Cluster().Refresh();self.lightMode_.Cluster().Refresh();
+            self.osdMode_.Cluster().Refresh();self.speakerLevel_.Cluster().Refresh();
             self.talk_.SetMuted(self.audioPreference_==std::optional<bool>(false)||self.av_.Cluster().GetSpeakerMuted()||self.av_.Cluster().GetSoftLivestreamPrivacyModeEnabled()||self.vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
             // MicrophoneMuted is honoured by sending no audio at all.
             const bool audio=self.audioPreference_!=std::optional<bool>(false)&&self.rtc_.AudioReady()&&!self.av_.Cluster().GetMicrophoneMuted()&&self.vendor_.Value(g2h::Vendor::MicrophoneMuted).value_or(1)==0;
@@ -298,6 +330,7 @@ private:
             if(periodic||session!=self.statusSession_){
                 self.statusAt_=now;self.statusSession_=session;
                 if(periodic){
+                    self.wifiRssi_=ReadWifiSignal();self.wifiSignal_.Cluster().Refresh();
                     self.radioCluster_.Cluster().Refresh();
                     if(self.nativeRadioRegistered_)self.nativeRadio_.Cluster().Refresh();
                 }
@@ -307,7 +340,7 @@ private:
                     if(FILE *f=fdopen(fd,"w")){
                         auto radio=self.radio_.Snapshot();
                         auto motion=self.motion_.state.Snapshot();auto motionValue=motion.Value();
-                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.5.4-native-diagnostics-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
+                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.5.5-native-settings-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
                             self.audio_.Stage(),self.audio_.Faulted()?"true":"false",self.rtc_.AudioReady()?"true":"false",
                             static_cast<unsigned long long>(sentAudio),static_cast<unsigned long long>(self.talk_.PlayedChunks()),
                             self.audio_.Channel(),static_cast<unsigned long long>(self.audio_.RtpPackets()),static_cast<unsigned long long>(self.audio_.AccessUnits()),
@@ -323,6 +356,12 @@ private:
             else {self.video_.DisableOwnStream();self.rtc_.Shutdown();}
         }catch(...){self.video_.DisableOwnStream();self.rtc_.Shutdown();}
     }
+    g2h::SettingsEndpoint nightEndpoint_{1,3},lightEndpoint_{2,4},osdEndpoint_{3,5},speakerEndpoint_{4,6,true};
+    LazyRegisteredServerCluster<g2h::SettingModeCluster> nightMode_,lightMode_,osdMode_;
+    LazyRegisteredServerCluster<g2h::SpeakerLevelCluster> speakerLevel_;
+    LazyRegisteredServerCluster<g2h::WifiSignalCluster> wifiSignal_;
+    std::optional<int8_t> wifiRssi_;
+    bool nightRegistered_=false,lightRegistered_=false,osdRegistered_=false,speakerRegistered_=false,wifiRegistered_=false;
     g2h::MotionSource motion_;
     LazyRegisteredServerCluster<g2h::MotionCluster> motionCluster_;
     LazyRegisteredServerCluster<g2h::NativeVisionMotion> nativeMotion_;
