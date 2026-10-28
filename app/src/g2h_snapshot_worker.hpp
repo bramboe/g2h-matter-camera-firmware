@@ -45,16 +45,27 @@ public:
         cv_.notify_all();pthread_join(thread_,nullptr);
         std::lock_guard<std::mutex> lock(mutex_);started_=false;pending_=false;jpeg_.clear();failedAt_={};
     }
+    // Non-blocking privacy boundary. An in-flight encoder may finish, but its
+    // old-epoch result cannot refill the cache or satisfy a later request.
+    // The source must independently invalidate its IDR cache at this boundary.
+    void SetGlobalAllowed(bool allowed){
+        {std::lock_guard<std::mutex> lock(mutex_);if(globalAllowed_==allowed)return;
+            globalAllowed_=allowed;++epoch_;pending_=false;jpeg_.clear();idrAt_={};failedAt_={};}
+        cv_.notify_all();
+    }
+    bool GlobalAllowed() const {std::lock_guard<std::mutex> lock(mutex_);return globalAllowed_;}
+    std::uint64_t Epoch() const {std::lock_guard<std::mutex> lock(mutex_);return epoch_;}
     // Non-blocking: begin preparing a JPEG at this quality.
-    void Request(unsigned quality,unsigned width=320,unsigned height=180){if(!Valid(quality,width,height))return;std::lock_guard<std::mutex> lock(mutex_);if(started_&&!stop_)RequestLocked(quality,width,height);}
+    void Request(unsigned quality,unsigned width=320,unsigned height=180){if(!Valid(quality,width,height))return;std::lock_guard<std::mutex> lock(mutex_);if(started_&&!stop_&&globalAllowed_)RequestLocked(quality,width,height);}
     bool Get(unsigned quality,std::chrono::milliseconds wait,std::vector<std::uint8_t>&out,unsigned width=320,unsigned height=180){
         if(!Valid(quality,width,height))return false;
         std::unique_lock<std::mutex> lock(mutex_);
-        if(!started_||stop_)return false;
+        if(!started_||stop_||!globalAllowed_)return false;
+        const auto epoch=epoch_;
         if(!FreshLocked(quality,width,height)){
             RequestLocked(quality,width,height);
-            cv_.wait_for(lock,wait,[&]{return stop_||FreshLocked(quality,width,height);});
-            if(stop_||!FreshLocked(quality,width,height))return false;
+            cv_.wait_for(lock,wait,[&]{return stop_||!globalAllowed_||epoch!=epoch_||FreshLocked(quality,width,height);});
+            if(stop_||!globalAllowed_||epoch!=epoch_||!FreshLocked(quality,width,height))return false;
         }
         out=jpeg_;return true;
     }
@@ -63,7 +74,7 @@ private:
     static void *Entry(void *self){try{static_cast<SnapshotWorker*>(self)->Run();}catch(...){}return nullptr;}
     static bool Valid(unsigned q,unsigned w,unsigned h){return q>=1&&q<=100&&SnapshotDimensions(w,h);}
     bool FreshLocked(unsigned quality,unsigned width,unsigned height) const {
-        return !jpeg_.empty()&&quality_==quality&&width_==width&&height_==height&&SteadyClock::now()-idrAt_<=maxAge_;
+        return globalAllowed_&&!jpeg_.empty()&&quality_==quality&&width_==width&&height_==height&&SteadyClock::now()-idrAt_<=maxAge_;
     }
     void RequestLocked(unsigned quality,unsigned width,unsigned height){
         const auto until=SteadyClock::now()+budget_;
@@ -75,6 +86,7 @@ private:
         while(!stop_){
             cv_.wait(lock,[&]{return stop_||pending_;});
             if(stop_)break;
+            const auto epoch=epoch_;
             const unsigned quality=wantQuality_,width=wantWidth_,height=wantHeight_;
             if(FreshLocked(quality,width,height)||SteadyClock::now()>=requestUntil_){pending_=false;cv_.notify_all();continue;}
             const auto failedAt=(failedQuality_==quality&&failedWidth_==width&&failedHeight_==height)?failedAt_:SteadyClock::time_point{};
@@ -86,6 +98,7 @@ private:
             if(have){try{jpeg=encode_(idr,quality,width,height);}catch(...){failed=true;}if(jpeg.empty()||jpeg.size()>64000)failed=true;}
             lock.lock();
             if(have)++encodes_;
+            if(stop_||!globalAllowed_||epoch!=epoch_)continue;
             if(have&&!failed){jpeg_=std::move(jpeg);quality_=quality;width_=width;height_=height;idrAt_=at;cv_.notify_all();}
             else if(have){failedAt_=at;failedQuality_=quality;failedWidth_=width;failedHeight_=height;} // Never retry the same undecodable IDR.
             // No usable fresh IDR yet: poll briefly until the request budget ends.
@@ -98,7 +111,8 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     pthread_t thread_{};
-    bool started_=false,stop_=false,pending_=false;
+    bool started_=false,stop_=false,pending_=false,globalAllowed_=true;
+    std::uint64_t epoch_=0;
     unsigned wantQuality_=0,quality_=0,encodes_=0,wantWidth_=320,wantHeight_=180,width_=0,height_=0;
     unsigned failedQuality_=0,failedWidth_=0,failedHeight_=0;
     SteadyClock::time_point requestUntil_{},idrAt_{},failedAt_{};

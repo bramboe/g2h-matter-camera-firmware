@@ -1,6 +1,7 @@
 // Experimental Linux camera endpoint. Installation/commissioning is a separate
 // step: this executable must never replace the vendor camera or radio service.
 #include "g2h_video_source.hpp"
+#include "g2h_capture_pause.hpp"
 #include "g2h_audio_source.hpp"
 #include "g2h_snapshot_codec.hpp"
 #include "g2h_snapshot_worker.hpp"
@@ -11,6 +12,8 @@
 #include "g2h_motion_source.hpp"
 #include "g2h_image_cluster.hpp"
 #include "g2h_control_mode_cluster.hpp"
+#include "g2h_video_control.hpp"
+#include "g2h_video_endpoint.hpp"
 #include "g2h_talkback.hpp"
 #include <AppMain.h>
 #include <Options.h>
@@ -34,6 +37,11 @@ bool persistentMode=false,trialMode=false,commissionTrial=false;
 volatile sig_atomic_t commissioningRequested=0;
 bool windowEverOpened=false;
 std::uint64_t sentFrames=0,sentAudio=0;
+bool SaveAudioPreference(bool enabled){
+    if(!persistentMode)return false;
+    const uint8_t value=enabled?1:0;
+    return DeviceLayer::PersistedStorage::KeyValueStoreMgr().Put("g2h-audio-enabled",&value,sizeof(value))==CHIP_NO_ERROR;
+}
 bool SaveThreadPreference(bool enabled){
     if(!persistentMode)return false;
     const uint8_t value=enabled?1:0;
@@ -58,10 +66,22 @@ public:
         // management cluster is exposed by this video-only model.
         ReturnErrorOnFailure(Clusters::TlsClientManagementCommandDelegate::GetInstance().Init(Server::GetInstance().GetPersistentStorage()));
         if(!snapshots_.Start())return CHIP_ERROR_NO_MEMORY;
+        videoControlInstalled_=videoControl_.Available();ApplyCaptureGate();
         // Camera controls: the vendor value is the source of truth (HomeKit and the
         // Aqara app change it too); no Matter write reaches the vendor while syncing.
         syncing_=true;
-        vendor_.ReadAll();if(!vendor_.Start())return CHIP_ERROR_NO_MEMORY;
+        vendor_.ReadAll();
+        // Native mutes are volatile across a camera boot. Restore only an
+        // explicit global choice, keeping own audio closed until readback.
+        if(persistentMode){
+            uint8_t enabled=0;size_t length=0;
+            const auto result=DeviceLayer::PersistedStorage::KeyValueStoreMgr().Get("g2h-audio-enabled",&enabled,sizeof(enabled),&length);
+            if(result==CHIP_NO_ERROR){
+                VerifyOrReturnError(length==1&&enabled<=1,CHIP_ERROR_INCORRECT_STATE);
+                VerifyOrReturnError(vendor_.WriteAudioMuted(enabled==0),CHIP_ERROR_INCORRECT_STATE);
+            }else if(result!=CHIP_ERROR_PERSISTED_STORAGE_VALUE_NOT_FOUND)return result;
+        }
+        if(!vendor_.Start())return CHIP_ERROR_NO_MEMORY;
         video_.attributeChanged=[this](AttributeId id){OnControlChanged(id);};
         bridge_.Attach(rtc_);
         provider_.Create(1,rtc_);
@@ -81,16 +101,29 @@ public:
         ReturnErrorOnFailure(registry.Register(motionCluster_.Registration()));motionRegistered_=true;
         if((persistentMode||trialMode)&&!motion_.Start())return CHIP_ERROR_NO_MEMORY;
         ReturnErrorOnFailure(registry.Register(provider_.Registration()));providerRegistered_=true;
-        imageCluster_.Create(vendor_,[this]{talk_.SetMuted(true);audio_.EnableFrames(false);});
+        imageCluster_.Create(vendor_,std::function<void()>{},[this](bool enabled){return SetAudioEnabled(enabled);});
         ReturnErrorOnFailure(registry.Register(imageCluster_.Registration()));imageRegistered_=true;
         audioMode_.Create(1,"Camera audio",[this]()->std::optional<bool>{
             auto value=vendor_.AudioMuted();return value?std::optional<bool>(!*value):std::nullopt;
-        },[this](bool enabled){talk_.SetMuted(true);audio_.EnableFrames(false);return vendor_.WriteAudioMuted(!enabled);});
+        },[this](bool enabled){return SetAudioEnabled(enabled);});
         ReturnErrorOnFailure(registry.Register(audioMode_.Registration()));audioModeRegistered_=true;
         threadMode_.Create(0,"Thread radio",[this]()->std::optional<bool>{
             auto control=radio_.ControlSnapshot();return control.pending?std::nullopt:control.observed;
         },[this](bool enabled){return SaveThreadPreference(enabled)&&radio_.SetEnabled(enabled);});
         ReturnErrorOnFailure(registry.Register(threadMode_.Registration()));threadModeRegistered_=true;
+        if(videoControlInstalled_){
+            ReturnErrorOnFailure(videoEndpoint_.Register());
+            videoMode_.Create(2,"Camera video (restart)",[this]{return videoControl_.Observe();},[this](bool enabled){
+                if(!captureRequested_&&videoControl_.Observe()==std::optional<bool>(enabled))return true;
+                // Close every app copy synchronously before a backend request.
+                captureRequested_=true;captureAllowed_=false;
+                vendor_.SetVideoSettingsAllowed(false);
+                video_.SetGlobalAllowed(false);snapshots_.SetGlobalAllowed(false);source_.SetGlobalAllowed(false);
+                rtc_.Shutdown();
+                return videoControl_.Request(enabled);
+            });
+            ReturnErrorOnFailure(registry.Register(videoMode_.Registration()));videoModeRegistered_=true;
+        }
         rtc_.SetCluster(&provider_.Cluster());
         g2h::av::VideoSensorParamsStruct sensor{};sensor.sensorWidth=g2h::kVideoWidth;sensor.sensorHeight=g2h::kVideoHeight;sensor.maxFPS=g2h::kVideoFps;
         g2h::av::VideoResolutionStruct viewport{};viewport.width=g2h::kVideoWidth;viewport.height=g2h::kVideoHeight;
@@ -135,6 +168,8 @@ public:
         auto &registry=CodegenDataModelProvider::Instance().Registry();
         if(audioModeRegistered_)(void)registry.Unregister(&audioMode_.Cluster());
         if(threadModeRegistered_)(void)registry.Unregister(&threadMode_.Cluster());
+        if(videoModeRegistered_)(void)registry.Unregister(&videoMode_.Cluster());
+        videoEndpoint_.Clear();
         if(motionRegistered_){(void)registry.Unregister(&motionCluster_.Cluster());motionRegistered_=false;}
         if(radioRegistered_){(void)registry.Unregister(&radioCluster_.Cluster());radioRegistered_=false;}
         if(providerRegistered_){(void)registry.Unregister(&provider_.Cluster());providerRegistered_=false;}
@@ -142,13 +177,30 @@ public:
         if(imageRegistered_){(void)registry.Unregister(&imageCluster_.Cluster());imageRegistered_=false;}
     }
 private:
+    bool SetAudioEnabled(bool enabled){
+        if(!SaveAudioPreference(enabled))return false;
+        talk_.SetMuted(true);audio_.EnableFrames(false);
+        return vendor_.WriteAudioMuted(!enabled);
+    }
+    // The private marker gates our copies only; it does not establish capture
+    // state. VideoControl independently verifies the preference and hardware.
+    void ApplyCaptureGate(){
+        const auto now=Clock::now();
+        if(captureRequested_||capturePause_.Paused())captureReleaseAt_=now+std::chrono::milliseconds(300);
+        const bool allowed=now>=captureReleaseAt_;
+        vendor_.SetVideoSettingsAllowed(allowed&&(!videoControlInstalled_||videoControl_.Observe()==std::optional<bool>(true)));
+        if(allowed==captureAllowed_)return;
+        if(!allowed){video_.SetGlobalAllowed(false);snapshots_.SetGlobalAllowed(false);source_.SetGlobalAllowed(false);}
+        else{source_.SetGlobalAllowed(true);snapshots_.SetGlobalAllowed(true);video_.SetGlobalAllowed(true);}
+        captureAllowed_=allowed;
+    }
     // Matter → camera, for attributes written by a controller.
     void OnControlChanged(AttributeId id){
         if(syncing_||!avRegistered_)return;
         namespace attr=g2h::av::Attributes;auto &c=av_.Cluster();
-        if(id==attr::NightVision::Id)(void)vendor_.Write(g2h::Vendor::NightVision,int(to_underlying(c.GetNightVision())));
+        if(id==attr::NightVision::Id){if(!vendor_.Write(g2h::Vendor::NightVision,int(to_underlying(c.GetNightVision())))){syncing_=true;SyncFromVendor(g2h::Vendor::NightVision);syncing_=false;}}
         else if(id==attr::StatusLightEnabled::Id)(void)vendor_.Write(g2h::Vendor::StatusLight,c.GetStatusLightEnabled()?1:0);
-        else if(id==attr::HDRModeEnabled::Id)(void)vendor_.Write(g2h::Vendor::Wdr,c.GetHDRModeEnabled()?1:0);
+        else if(id==attr::HDRModeEnabled::Id){if(!vendor_.Write(g2h::Vendor::Wdr,c.GetHDRModeEnabled()?1:0)){syncing_=true;SyncFromVendor(g2h::Vendor::Wdr);syncing_=false;}}
         else if(id==attr::SpeakerVolumeLevel::Id)(void)vendor_.Write(g2h::Vendor::SpeakerVolume,(int(c.GetSpeakerVolumeLevel())*100+127)/254);
         else if(id==attr::SpeakerMuted::Id)talk_.SetMuted(c.GetSpeakerMuted()||c.GetSoftLivestreamPrivacyModeEnabled()||vendor_.Value(g2h::Vendor::SpeakerMuted).value_or(1)!=0);
         // App-level privacy: stop sending video/audio over Matter; vendor stream untouched.
@@ -192,8 +244,10 @@ private:
     static void Tick(System::Layer*,void *context){
         auto &self=*static_cast<CameraRuntime*>(context);self.timer_=false;
         try{
+            self.ApplyCaptureGate();
             self.motionCluster_.Cluster().Refresh();
             self.audioMode_.Cluster().Refresh();self.threadMode_.Cluster().Refresh();
+            if(self.videoModeRegistered_)self.videoMode_.Cluster().Refresh();
             auto &window=Server::GetInstance().GetCommissioningWindowManager();
             if(commissioningRequested){
                 commissioningRequested=0;
@@ -235,7 +289,7 @@ private:
                     if(FILE *f=fdopen(fd,"w")){
                         auto radio=self.radio_.Snapshot();
                         auto motion=self.motion_.state.Snapshot();auto motionValue=motion.Value();
-                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.5.1-controls-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
+                        std::fprintf(f,"{\"pid\":%ld,\"ready\":true,\"fabrics\":%u,\"commissioning_window_open\":%s,\"video_session\":%s,\"frames_sent\":%llu,\"video_enabled\":%s,\"source_fault\":%s,\"delegate_owner_thread\":%s,\"last_video_stage\":\"%s\",\"thread_fresh\":%s,\"thread_role\":\"%s\",\"monotonic_ms\":%lld,\"audio_stage\":\"%s\",\"audio_fault\":%s,\"audio_session\":%s,\"audio_sent\":%llu,\"talk_played\":%llu,\"audio_channel\":%u,\"audio_rtp\":%llu,\"audio_aus\":%llu,\"audio_decode_errors\":%llu,\"talk_received\":%llu,\"talk_published\":%llu,\"audio_adts_stripped\":%llu,\"audio_last_error\":%u,\"media_broker\":%s,\"app_build\":\"0.5.3-audio-persistence-candidate\",\"motion_available\":%s,\"motion\":%s,\"motion_reason\":\"%s\"}\n",long(getpid()),unsigned(Server::GetInstance().GetFabricTable().FabricCount()),window.IsCommissioningWindowOpen()?"true":"false",self.rtc_.HasSession()?"true":"false",static_cast<unsigned long long>(sentFrames),self.video_.Enabled()?"true":"false",self.source_.Faulted()?"true":"false",self.rtc_.IsOwnerThread()?"true":"false",self.rtc_.LastStage(),radio.Fresh()?"true":"false",radio.role.c_str(),static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()),
                             self.audio_.Stage(),self.audio_.Faulted()?"true":"false",self.rtc_.AudioReady()?"true":"false",
                             static_cast<unsigned long long>(sentAudio),static_cast<unsigned long long>(self.talk_.PlayedChunks()),
                             self.audio_.Channel(),static_cast<unsigned long long>(self.audio_.RtpPackets()),static_cast<unsigned long long>(self.audio_.AccessUnits()),
@@ -257,6 +311,12 @@ private:
     g2h::ThreadRadio radio_;
     LazyRegisteredServerCluster<g2h::ThreadRadioCluster> radioCluster_;
     bool radioRegistered_=false;
+    g2h::media::CapturePause capturePause_;
+    g2h::VideoControl videoControl_;
+    g2h::VideoEndpoint videoEndpoint_;
+    LazyRegisteredServerCluster<g2h::ControlModeCluster> videoMode_;
+    bool videoModeRegistered_=false,captureRequested_=false,videoControlInstalled_=false;
+    Clock::time_point captureReleaseAt_{};bool captureAllowed_=true;
     g2h::VideoSource source_;
     // Declared after source_ so it stops first; holds at most one JPEG.
     g2h::SnapshotWorker snapshots_{[this](std::vector<std::uint8_t>&idr,Clock::time_point&at){return source_.LatestIdr(idr,at);},

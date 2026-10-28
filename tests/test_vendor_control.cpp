@@ -50,7 +50,21 @@ struct FakeVendor {
 int main(){
     FakeVendor server;
     {
-        g2h::VendorControl control;control.ReadAll();assert(server.sets==0);
+        g2h::VendorControl control;control.ReadAll();
+        assert(control.Write(g2h::Vendor::Wdr,1));
+        control.SetVideoSettingsAllowed(false);
+        assert(!control.Write(g2h::Vendor::Wdr,1)&&!control.Write(g2h::Vendor::Brightness,80));
+        assert(!control.Write(g2h::Vendor::NightVision,1)&&!control.Write(g2h::Vendor::Osd,0));
+        assert(control.WriteAudioMuted(true)&&control.Start());Until([&]{return control.AudioMuted()==true;});
+        {std::lock_guard<std::mutex> lock(server.mutex);assert(server.values.at("video wdr")==0&&server.values.at("video brightness")==50);}
+        assert(control.WriteAudioMuted(false));Until([&]{return control.AudioMuted()==false;});
+        control.SetVideoSettingsAllowed(true);assert(control.Write(g2h::Vendor::Wdr,1));
+        Until([&]{std::lock_guard<std::mutex> lock(server.mutex);return server.values.at("video wdr")==1;});
+        assert(control.Write(g2h::Vendor::Wdr,0));Until([&]{std::lock_guard<std::mutex> lock(server.mutex);return server.values.at("video wdr")==0;});control.Stop();
+    }
+    {
+        const auto sets=server.sets.load();
+        g2h::VendorControl control;control.ReadAll();assert(server.sets==sets);
         assert(control.AudioMuted()==false&&control.Value(g2h::Vendor::SpeakerVolume)==80);
         assert(!control.Write(g2h::Vendor::MicrophoneMuted,2)&&!control.Write(g2h::Vendor::SpeakerMuted,-1));
         assert(!control.Write(g2h::Vendor::Count,1)&&!control.Value(g2h::Vendor::Count));

@@ -30,7 +30,7 @@ public:
     VideoDelegate& operator=(const VideoDelegate&)=delete;
 
     Status VideoStreamAllocate(const av::VideoStreamStruct &r, std::uint16_t &id) override {
-        if(!enabled_ || fault_) return Status::InvalidInState;
+        if(!Enabled()) return Status::InvalidInState;
         if(!Compatible(r)) return Status::DynamicConstraintError;
         if(reserved_) return Status::ResourceExhausted;
         if(!streams_.empty()&&active_){id=1;return Status::Success;}
@@ -164,10 +164,14 @@ public:
         if(auto *cluster=GetCameraAVStreamManagementCluster())return cluster->UpdateAudioStreamRefCount(kAudioStreamId,false);
         if(audioStreams_[0].referenceCount)--audioStreams_[0].referenceCount;return CHIP_NO_ERROR;
     }
-    bool Active() const {return active_ && enabled_ && !fault_;}
+    bool Active() const {return active_ && Enabled();}
     bool Faulted() const {return fault_;}
     bool Allocated(std::uint16_t id) const {return id==1 && streams_.size()==1;}
-    bool Enabled() const {return enabled_&&!fault_&&!privacy_;}
+    bool Enabled() const {return enabled_&&!fault_&&!privacy_&&globalAllowed_;}
+    // Separate from the controller's persisted Matter soft-privacy preference.
+    // The stop callback gates our subscriber only; it must not close native ingest.
+    void SetGlobalAllowed(bool allowed){if(globalAllowed_==allowed)return;globalAllowed_=allowed;if(!allowed)StopOwnStream();}
+    bool GlobalAllowed() const {return globalAllowed_;}
     // App-level livestream privacy: this app stops sending video/audio over Matter,
     // but the vendor video_on, RTSP and HomeKit are untouched. Reversible.
     void SetLivestreamPrivacy(bool on){if(privacy_==on)return;privacy_=on;if(on)StopOwnStream();}
@@ -231,7 +235,7 @@ private:
     bool snapshotAllocated_=false;
     unsigned snapshotQuality_=70;
     av::VideoResolutionStruct snapshotMin_{320,180},snapshotMax_{320,180};
-    bool reserved_=false, prepared_=false, active_=false, enabled_=true, fault_=false, privacy_=false;
+    bool reserved_=false, prepared_=false, active_=false, enabled_=true, fault_=false, privacy_=false, globalAllowed_=true;
     std::vector<av::VideoStreamStruct> streams_;
 };
 }

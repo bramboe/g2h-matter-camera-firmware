@@ -19,8 +19,9 @@ class ImageSettingsCluster final: public chip::app::DefaultServerCluster {
 public:
     static constexpr chip::ClusterId kId=0xFFF1FC11;
     static constexpr chip::AttributeId kBrightness=0,kSpeakerVolume=1,kOsd=2,kAudioEnabled=3;
-    explicit ImageSettingsCluster(VendorControl &vendor,std::function<void()> beforeAudioChange={}):
-        DefaultServerCluster({1,kId}),vendor_(vendor),beforeAudioChange_(std::move(beforeAudioChange)){}
+    explicit ImageSettingsCluster(VendorControl &vendor,std::function<void()> beforeAudioChange={},
+        std::function<bool(bool)> requestAudioChange={}):
+        DefaultServerCluster({1,kId}),vendor_(vendor),beforeAudioChange_(std::move(beforeAudioChange)),requestAudioChange_(std::move(requestAudioChange)){}
     void Changed(Vendor which){
         if(which==Vendor::Brightness)NotifyAttributeChanged(kBrightness);
         if(which==Vendor::SpeakerVolume)NotifyAttributeChanged(kSpeakerVolume);
@@ -58,8 +59,12 @@ public:
         using namespace chip;const auto id=request.path.mAttributeId;
         if(id==kAudioEnabled){
             bool enabled=false;ReturnErrorOnFailure(decoder.Decode(enabled));
-            if(beforeAudioChange_)beforeAudioChange_();
-            if(!vendor_.WriteAudioMuted(!enabled))return Protocols::InteractionModel::Status::Failure;
+            if(requestAudioChange_){
+                if(!requestAudioChange_(enabled))return Protocols::InteractionModel::Status::Failure;
+            }else{
+                if(beforeAudioChange_)beforeAudioChange_();
+                if(!vendor_.WriteAudioMuted(!enabled))return Protocols::InteractionModel::Status::Failure;
+            }
             NotifyAttributeChanged(id);return Protocols::InteractionModel::Status::Success;
         }
         const auto which=Map(id);if(!which)return Protocols::InteractionModel::Status::UnsupportedWrite;
@@ -79,5 +84,6 @@ private:
     }
     VendorControl &vendor_;
     std::function<void()> beforeAudioChange_;
+    std::function<bool(bool)> requestAudioChange_;
 };
 }

@@ -151,6 +151,7 @@ def upgrade(session,image,broker,backup_root,storage='customer',qualify_seconds=
   transaction=CFG+'/update-'+uuid.uuid4().hex
   session.run('set -e\nmkdir '+Q(transaction)+'\nprintf \'%s\\n\' '+Q(old)+' > '+Q(transaction+'/previous')+'\nprintf \'%s\\n\' '+Q(candidate)+' > '+Q(transaction+'/candidate')+'\nprintf \'%s\\n\' '+Q(previous_broker)+' > '+Q(transaction+'/previous-broker')+'\ncat /proc/sys/kernel/random/boot_id > '+Q(transaction+'/boot')+'\nsync\nmv '+Q(transaction)+' '+Q(PENDING)+'\nsync')
   switched=True
+  guardian_started=time.monotonic()
   session.run('sh '+Q(CFG+'/update-guard.sh')+' '+Q(candidate)+' </dev/null >/dev/null 2>&1 &')
   time.sleep(1);guardian_ready(session,candidate)
   if identity(session)!=before or checksum(session,old)!=old_md5:raise RuntimeError('host or previous app changed before switch')
@@ -160,21 +161,40 @@ def upgrade(session,image,broker,backup_root,storage='customer',qualify_seconds=
   session.run('set -e\nprintf \'%s\\n\' '+Q(candidate)+' > '+Q(CFG+'/app-path.next')+'\nmv '+Q(CFG+'/app-path.next')+' '+Q(CFG+'/app-path')+'\n: > '+Q(CFG+'/media-broker-enabled')+'\nsync')
   session.run(INIT+' stop',timeout=20)
   session.run(INIT+' start',timeout=12)
-  deadline=time.monotonic()+qualify_seconds+20
+  # Radio status can need a complete polling cycle after an app restart. Give
+  # startup its own allowance without shortening continuous qualification, and
+  # reserve at least 30 seconds before the independent 180-second rollback.
+  qualification_started=time.monotonic()
+  deadline=min(qualification_started+qualify_seconds+75,guardian_started+150)
+  observations=record['qualification_observations']=[]
   stable_since=None
+  last_status_tick=None;last_status_progress=qualification_started
   while time.monotonic()<deadline:
    time.sleep(2)
    now=identity(session)
    if now!=before:raise RuntimeError('host or vendor camera restarted; candidate not accepted')
    try:current=safe_status(session)
-   except Exception:stable_since=None;continue
+   except Exception:
+    observations.append({'elapsed_seconds':round(time.monotonic()-qualification_started,2),'state':'status_unavailable'})
+    stable_since=None;continue
+   # safe_status returns a fixed allowlist, never keys, datasets or raw logs.
+   observations.append({'elapsed_seconds':round(time.monotonic()-qualification_started,2),'status':current})
    app_identity(session,current,candidate)
+   if status.get('monotonic_ms') is not None:
+    tick=current.get('monotonic_ms')
+    if type(tick) is not int or tick<0:raise RuntimeError('candidate status clock unavailable')
+    if last_status_tick is not None and tick<last_status_tick:raise RuntimeError('candidate status clock moved backwards')
+    if tick!=last_status_tick:last_status_tick=tick;last_status_progress=time.monotonic()
+    elif time.monotonic()-last_status_progress>=15:raise RuntimeError('candidate status stopped advancing')
    if current['fabrics']!=status['fabrics']:raise RuntimeError('fabric count changed')
    if status.get('thread_fresh') and not current.get('thread_fresh'):stable_since=None;continue
+   if status.get('thread_role') in ('child','router','leader') and current.get('thread_role') not in ('child','router','leader'):stable_since=None;continue
    if current.get('source_fault'):raise RuntimeError('candidate media source fault')
    if current.get('media_broker') is not True:raise RuntimeError('candidate is not using the independent media broker')
-   if stable_since is None:stable_since=time.monotonic()
-   if time.monotonic()-stable_since>=qualify_seconds:break
+   sampled=time.monotonic()
+   if sampled>=deadline:raise RuntimeError('qualification exhausted its guarded time budget')
+   if stable_since is None:stable_since=sampled
+   if sampled-stable_since>=qualify_seconds:break
   else:raise RuntimeError('candidate did not remain ready for qualification window')
   # Atomic exclusion from the independent timeout action. Commit preserves a
   # durable previous pointer for explicit rollback after the test window.
@@ -184,7 +204,8 @@ def upgrade(session,image,broker,backup_root,storage='customer',qualify_seconds=
   record.update(verified=True,status=current,after=identity(session))
   private_json(backup/'upgrade.json',record)
   return record
- except BaseException:
+ except BaseException as error:
+  record['failure_type']=type(error).__name__
   if switched:
    try:session.run(INIT+' rollback',timeout=30);record['rollback_requested']=True
    except Exception:record['rollback_waiting_for_guardian_or_reboot']=True

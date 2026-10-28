@@ -147,6 +147,58 @@ class Controls(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(entities[0].available);self.assertIsNone(entities[0].is_on)
         await entities[0].coordinator.close()
 
+    async def test_video_queues_reboot_without_reporting_requested_state(self):
+        video_mode=1
+        async def read(node,paths):
+            self.assertEqual(node,73)
+            if paths==[target.VIDEO_REVISION]:return {target.VIDEO_REVISION:2}
+            if paths==[target.VIDEO_STATE]:return {target.VIDEO_STATE:video_mode}
+            self.assertEqual(paths,target.PATHS);return values()
+        self.client.read_attribute.side_effect=read
+        await self.coordinator.async_refresh()
+        entity=target.CameraControlSwitch(self.coordinator,self.entry,'video')
+        self.assertIs(entity.is_on,True)
+        await self.coordinator.set_enabled('video',False)
+        self.client.send_command.assert_awaited_once_with('device_command',node_id=73,
+            endpoint_id=2,cluster_id=80,command_name='ChangeToMode',payload={'newMode':0})
+        self.assertIsNone(entity.is_on);self.assertFalse(entity.available)
+        video_mode=0
+        await self.coordinator.async_refresh()
+        self.assertIs(entity.is_on,False);self.assertTrue(entity.available)
+
+    async def test_unsupported_video_probe_preserves_existing_controls(self):
+        async def read(node,paths):
+            if paths==[target.VIDEO_REVISION]:raise MatterError('unsupported endpoint')
+            return values()
+        self.client.read_attribute.side_effect=read
+        await self.coordinator.async_refresh()
+        self.assertTrue(target.CameraControlSwitch(self.coordinator,self.entry,'audio').available)
+        self.assertTrue(target.CameraControlSwitch(self.coordinator,self.entry,'thread').available)
+        self.assertFalse(self.coordinator.data['video']['supported'])
+
+    async def test_slow_optional_probe_keeps_controls_unavailable_until_rpc_finishes(self):
+        gate=asyncio.Event()
+        async def read(node,paths):
+            if paths==[target.VIDEO_REVISION]:
+                await gate.wait()
+                return {target.VIDEO_REVISION:2}
+            if paths==[target.VIDEO_STATE]:return {target.VIDEO_STATE:1}
+            return values()
+        self.client.read_attribute.side_effect=read
+        await self.coordinator.async_refresh()
+        self.assertFalse(self.coordinator.last_update_success)
+        pending=self.coordinator._pending_rpc
+        self.assertIsNotNone(pending)
+        self.assertFalse(pending.done())
+        await self.coordinator.async_refresh()
+        self.assertFalse(self.coordinator.last_update_success)
+        self.assertIs(self.coordinator._pending_rpc,pending)
+        gate.set()
+        await pending
+        await self.coordinator.async_refresh()
+        self.assertTrue(self.coordinator.last_update_success)
+        self.assertTrue(target.CameraControlSwitch(self.coordinator,self.entry,'video').available)
+
     async def test_vendor_only_controls_without_standard_transport_are_not_offered(self):
         old=values()
         for path in target.MODE_REVISION.values():old.pop(path)

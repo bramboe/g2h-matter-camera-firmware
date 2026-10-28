@@ -1,0 +1,29 @@
+#!/bin/sh
+# Camera wrapper: no video preference means normal startup. Invalid explicit
+# preferences fail closed. The native image itself is never modified here.
+base=/customer/g2h-matter-camera
+cfg=/mnt/config/g2h-matter-camera
+native=/tmp/out/camera
+private_file() {
+ [ ! -L "$1" ] && [ -f "$1" ] &&
+ [ "$(stat -c %u "$1")" = 0 ] && [ "$(stat -c %a "$1")" = 600 ]
+}
+video=1
+if [ -e "$cfg/video-enabled" ] || [ -L "$cfg/video-enabled" ]; then
+ private_file "$cfg/video-enabled" || exit 125
+ [ "$(stat -c %s "$cfg/video-enabled")" = 2 ] || exit 125
+ read video < "$cfg/video-enabled" || exit 125
+ case "$video" in 0|1) ;; *) exit 125;; esac
+fi
+if [ "$video" = 0 ]; then
+ private_file "$cfg/video-profile" || exit 125
+ read native_md5 helper_md5 < "$cfg/video-profile" || exit 125
+ case "$native_md5:$helper_md5" in *[!0-9a-f:]*|:*) exit 125;; esac
+ [ "${#native_md5}:${#helper_md5}" = 32:32 ] || exit 125
+ [ ! -L "$base/video-boot-gate.so" ] && [ -f "$base/video-boot-gate.so" ] || exit 125
+ [ "$(md5sum "$native" | awk '{print $1}')" = "$native_md5" ] || exit 125
+ [ "$(md5sum "$base/video-boot-gate.so" | awk '{print $1}')" = "$helper_md5" ] || exit 125
+ export G2H_VIDEO_BOOT_BLOCKED=1
+ export LD_PRELOAD="$base/video-boot-gate.so"
+fi
+exec "$native" "$@"

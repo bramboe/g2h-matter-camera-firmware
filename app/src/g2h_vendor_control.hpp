@@ -34,6 +34,7 @@ inline constexpr std::array<VendorSetting,std::size_t(Vendor::Count)> kVendorSet
     {"audio","out_mute",0,1},
 }};
 inline constexpr bool IsAudioMute(Vendor which){return which==Vendor::MicrophoneMuted||which==Vendor::SpeakerMuted;}
+inline constexpr bool IsVideoSetting(Vendor which){return which==Vendor::NightVision||which==Vendor::Osd||which==Vendor::Wdr||which==Vendor::Brightness;}
 
 // 101 on the camera; host tests point it at a fake server.
 inline std::uint16_t vendorDebugPort=101;
@@ -81,6 +82,13 @@ class VendorControl {
 public:
     static constexpr std::size_t kCount=std::size_t(Vendor::Count);
     ~VendorControl(){Stop();}
+    void SetVideoSettingsAllowed(bool allowed){
+        std::lock_guard<std::mutex> lock(mutex_);if(videoSettingsAllowed_==allowed)return;
+        videoSettingsAllowed_=allowed;
+        if(!allowed)for(std::size_t i=0;i<kCount;++i)if(IsVideoSetting(Vendor(i))&&hasPending_[i]){
+            hasPending_[i]=false;known_[i]=false;changed_[i]=true;
+        }
+    }
     // Blocking initial read (startup only, bounded by 1 s per setting).
     void ReadAll(){
         for(std::size_t i=0;i<kCount;++i){
@@ -127,7 +135,9 @@ public:
     bool Write(Vendor which,int value){
         const auto i=std::size_t(which);if(i>=kCount)return false;const auto &s=kVendorSettings[i];
         if(value<s.min||value>s.max)return false;
-        {std::lock_guard<std::mutex> lock(mutex_);pending_[i]=value;hasPending_[i]=true;
+        {std::lock_guard<std::mutex> lock(mutex_);
+            if(IsVideoSetting(which)&&!videoSettingsAllowed_)return false;
+            pending_[i]=value;hasPending_[i]=true;
             if(IsAudioMute(which)){known_[i]=false;changed_[i]=true;}
             else{value_[i]=value;known_[i]=true;}}
         cv_.notify_all();return true;
@@ -178,7 +188,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     pthread_t thread_{};
-    bool started_=false,stop_=false;
+    bool started_=false,stop_=false,videoSettingsAllowed_=true;
     std::array<int,kCount> value_{},pending_{};
     std::array<bool,kCount> known_{},hasPending_{},changed_{};
 };

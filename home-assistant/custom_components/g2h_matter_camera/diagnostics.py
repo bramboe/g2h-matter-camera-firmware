@@ -128,7 +128,7 @@ async def async_get_config_entry_diagnostics(hass, entry):
 
     runtime = hass.data.get(DOMAIN,{}).get(entry.entry_id,{})
     node_available = getattr(runtime.get('node'),'available',None)
-    output={'extension_version':'0.5.1',
+    output={'extension_version':'0.5.2',
             'cached_node_available':node_available if isinstance(node_available,bool) else None,
             'radio':_coordinator_summary(runtime.get('radio')),
             'motion':_coordinator_summary(runtime.get('motion'),True)}

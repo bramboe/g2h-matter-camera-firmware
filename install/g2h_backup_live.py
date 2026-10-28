@@ -33,7 +33,7 @@ FILES = (
 )
 ALLOWED_PATHS = frozenset(row[0] for row in FILES) | {SELECTOR}
 STATUS_KEYS = ("pid", "ready", "fabrics", "video_session", "source_fault",
-               "thread_fresh", "thread_role", "thread_channel", "media_broker")
+               "thread_fresh", "thread_role", "thread_channel", "media_broker", "monotonic_ms")
 
 
 class BackupError(RuntimeError):

@@ -21,6 +21,9 @@ THREAD_PATH = f'0/{0xFFF1FC10}/'
 MODE_REVISION = {'audio': '1/80/65533', 'thread': '0/80/65533'}
 PATHS = [AUDIO_PATH] + [THREAD_PATH + str(i) for i in (24, 25, 26, 27)] + list(MODE_REVISION.values())
 NAMES = {'audio': 'Geluid', 'thread': 'Thread'}
+VIDEO_REVISION='2/80/65533'
+VIDEO_STATE='2/80/3'
+NAMES['video']='Video'
 
 
 def control_values(values):
@@ -66,6 +69,7 @@ class ControlsCoordinator(DataUpdateCoordinator):
         self._lock = asyncio.Lock()
         self.writing = set()
         self.failed = set()
+        self._video_supported = None
 
     def _client(self):
         runtime = self.hass.data[DOMAIN][self.entry.entry_id]
@@ -101,7 +105,29 @@ class ControlsCoordinator(DataUpdateCoordinator):
     async def _read(self):
         client = self._client()
         values = await self._rpc(lambda: client.read_attribute(self.entry.data['node_id'], list(PATHS)))
-        return control_values(values)
+        data=control_values(values)
+        # Probe separately: an unsupported endpoint on older firmware must not
+        # make the existing sound/radio controls disappear.
+        if self._video_supported is None:
+            try:
+                revision=await self._rpc(lambda: client.read_attribute(self.entry.data['node_id'],[VIDEO_REVISION]))
+                self._video_supported=isinstance(revision,dict) and revision.get(VIDEO_REVISION)==2
+            except TimeoutError:
+                raise
+            except (ValueError,OSError,RuntimeError,MatterError,MatterClientException,ClientError):
+                pass
+        state=None
+        if self._video_supported:
+            try:
+                value=await self._rpc(lambda: client.read_attribute(self.entry.data['node_id'],[VIDEO_STATE]))
+                mode=value.get(VIDEO_STATE) if isinstance(value,dict) else None
+                if type(mode) is int and mode in (0,1):state=mode==1
+            except TimeoutError:
+                raise
+            except (ValueError,OSError,RuntimeError,MatterError,MatterClientException,ClientError):
+                pass
+        data['video']={'supported':self._video_supported is True,'state':state}
+        return data
 
     async def _async_update_data(self):
         try:
@@ -131,8 +157,16 @@ class ControlsCoordinator(DataUpdateCoordinator):
                 # writing an unknown cluster model. Invoke standard Mode Select
                 # and keep the vendor observations as the independent readback.
                 await self._rpc(lambda: client.send_command('device_command',
-                    node_id=self.entry.data['node_id'], endpoint_id=1 if key == 'audio' else 0,
+                    node_id=self.entry.data['node_id'], endpoint_id={'audio':1,'thread':0,'video':2}[key],
                     cluster_id=80, command_name='ChangeToMode', payload={'newMode': int(enabled)}))
+                if key=='video':
+                    # The authenticated request queues a full camera boot.
+                    # Report transition/unknown until a later real observation;
+                    # do not hold the shared control lock across a long reboot.
+                    observed=dict(self.data)
+                    observed['video']={'supported':True,'state':None}
+                    self.async_set_updated_data(observed)
+                    return
                 deadline = self.hass.loop.time() + self.verification_timeout
                 while True:
                     observed = await self._read()
@@ -182,7 +216,7 @@ class CameraControlSwitch(CoordinatorEntity, SwitchEntity):
         super().__init__(coordinator)
         self.key = key
         self._attr_name = NAMES[key]
-        self._attr_icon = 'mdi:volume-high' if key == 'audio' else 'mdi:network'
+        self._attr_icon = {'audio':'mdi:volume-high','thread':'mdi:network','video':'mdi:video'}[key]
         self._attr_unique_id = entry.data['unique_id'] + '-control-' + key
         client = coordinator.hass.data[DOMAIN][entry.entry_id]['client']
         self._attr_device_info = DeviceInfo(identifiers={
@@ -201,6 +235,7 @@ class CameraControlSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def extra_state_attributes(self):
+        if self.key=='video':return {'camera_restart_required':True}
         if self.key!='thread' or not isinstance(self.coordinator.data,dict):
             return None
         value=self.coordinator.data.get('thread',{})

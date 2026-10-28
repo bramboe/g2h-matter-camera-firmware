@@ -81,12 +81,14 @@ snapshots, queued-audio mute fixes, and guarded slot updates are described in
 [IMPROVEMENTS.md](docs/IMPROVEMENTS.md). These source changes require hardware
 qualification; the historical prebuilt executable remains identified separately.
 
-The installed 0.5.1 [audio and Thread controls candidate](docs/CONTROLS.md)
-passed guarded device and HA off/on trials. Standard Matter mode selectors and
-the companion switches reuse the existing pairing. Physical acoustic silence,
-reboot persistence and extended stability remain unqualified. Full native
-image-off (including RTSP) remains unresolved and is not offered as a switch.
-See the [bounded device test report](docs/TEST-REPORT-2026-10-26.md).
+The installed 0.5.3 [audio, video and Thread controls candidate](docs/CONTROLS.md)
+reuses the existing Matter pairing. Full video off/on passed a bounded device
+trial: a clean boot suppresses native capture, recording and RTSP tasks; another
+boot restores decoded Matter video/audio. The explicit video preference persists
+at startup. Both video transitions briefly restart the camera. Audio and Thread
+remain separate controls. Physical acoustic silence, disabled Thread preference
+across reboot and extended stability remain unqualified. The historical public
+prebuilt is unchanged. See the [current device test report](docs/TEST-REPORT-2026-10-28.md).
 
 ## Source builds and release evidence
 

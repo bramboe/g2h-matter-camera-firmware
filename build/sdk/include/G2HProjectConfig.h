@@ -1,4 +1,5 @@
 #pragma once
+#define CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT 1
 // Explicit metadata for the isolated SDK build, independent of compiler clock.
 #define CHIP_DEVICE_CONFIG_FIRMWARE_BUILD_DATE "Oct 20 2026"
 #define CHIP_DEVICE_CONFIG_FIRMWARE_BUILD_TIME "00:00:00"
@@ -8,5 +9,5 @@
 #define CHIP_DEVICE_CONFIG_DEVICE_NAME "Aqara G2H Thread & Matter Camera"
 
 // Project firmware metadata; vendor/product identity and fabric storage are unchanged.
-#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION 501
-#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION_STRING "0.5.1-controls-candidate"
+#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION 503
+#define CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION_STRING "0.5.3-audio-persistence-candidate"

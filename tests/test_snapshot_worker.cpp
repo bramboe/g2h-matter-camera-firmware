@@ -115,5 +115,33 @@ int main(){
         {std::lock_guard<std::mutex> l(f.m);f.at=SC::now();f.idr.resize(1024*1024+1);}
         assert(!w.Get(70,milliseconds(140),out));assert(f.encodes==0);
     }
+    {   // Privacy cancels a pending waiter and rejects new requests immediately.
+        Fake f;SnapshotWorker w(f.Source(),f.Encode());assert(w.Start());
+        std::atomic<bool> returned{false},ok{true};
+        std::thread waiter([&]{std::vector<uint8_t> out;ok=w.Get(70,seconds(5),out);returned=true;});
+        std::this_thread::sleep_for(milliseconds(30));w.SetGlobalAllowed(false);
+        for(unsigned n=0;n<100&&!returned;++n)std::this_thread::sleep_for(milliseconds(2));
+        assert(returned&&!ok);waiter.join();std::vector<uint8_t> out;
+        auto t=SC::now();assert(!w.Get(70,seconds(5),out)&&Elapsed(t)<milliseconds(30));
+        f.Set(14);w.Request(70);std::this_thread::sleep_for(milliseconds(30));assert(f.encodes==0);
+        assert(!w.GlobalAllowed());const auto epoch=w.Epoch();w.SetGlobalAllowed(false);assert(w.Epoch()==epoch);
+        w.SetGlobalAllowed(true);assert(w.Epoch()==epoch+1&&w.Get(70,milliseconds(300),out)&&out[2]==14);
+    }
+    {   // A blocked old-epoch encode cannot refill the cache after a complete off/on.
+        Fake f;f.Set(15);std::mutex mutex;std::condition_variable cv;
+        bool entered=false,release=false;unsigned calls=0;
+        SnapshotWorker w(f.Source(),[&](const std::vector<uint8_t>&in,unsigned){
+            std::unique_lock<std::mutex> lock(mutex);++calls;
+            if(calls==1){entered=true;cv.notify_all();cv.wait(lock,[&]{return release;});}
+            return std::vector<uint8_t>{in.back()};
+        });assert(w.Start());w.Request(70);
+        {std::unique_lock<std::mutex> lock(mutex);assert(cv.wait_for(lock,seconds(1),[&]{return entered;}));}
+        w.SetGlobalAllowed(false);w.SetGlobalAllowed(true);f.Set(16);w.Request(70);
+        {std::lock_guard<std::mutex> lock(mutex);release=true;}cv.notify_all();
+        std::vector<uint8_t> out;assert(w.Get(70,milliseconds(500),out)&&out==std::vector<uint8_t>{16});
+        assert(calls==2); // The old encode ran but never became observable.
+        w.SetGlobalAllowed(false);assert(!w.Get(70,milliseconds(0),out));
+        w.SetGlobalAllowed(true);f.Set(17);assert(w.Get(70,milliseconds(300),out)&&out==std::vector<uint8_t>{17});
+    }
     std::puts("snapshot worker tests passed");
 }

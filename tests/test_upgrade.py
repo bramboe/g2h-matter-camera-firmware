@@ -260,6 +260,74 @@ class UpgradeTests(unittest.TestCase):
             self.run_upgrade()
         self.assertEqual(self.camera.events, [])
 
+    def test_delayed_radio_sample_still_gets_full_continuous_qualification(self):
+        def status(session):
+            result = dict(self.status)
+            if self.camera.selector != self.camera.old:
+                result['thread_fresh'] = self.clock.now >= 36
+            return result
+        with patch.object(upgrade, 'safe_status', status):
+            result = self.run_upgrade()
+        rows = result['qualification_observations']
+        fresh = [row['elapsed_seconds'] for row in rows if row['status']['thread_fresh']]
+        self.assertGreaterEqual(fresh[-1] - fresh[0], 15)
+        self.assertGreater(self.clock.now, 36)
+        self.assertTrue(result['verified'])
+
+    def test_never_fresh_rolls_back_with_guardian_time_remaining(self):
+        def status(session):
+            return dict(self.status, thread_fresh=self.camera.selector == self.camera.old)
+        with patch.object(upgrade, 'safe_status', status):
+            with self.assertRaisesRegex(RuntimeError, 'qualification window'):
+                upgrade.upgrade(self.camera, self.image, self.broker, Path(self.temp.name), qualify_seconds=90)
+        self.assertLessEqual(self.clock.now, 152)
+        self.assertIn('rollback', self.camera.events)
+        self.assertNotIn('commit', self.camera.events)
+        record = json.loads((self.backup_dir / 'upgrade.json').read_text())
+        self.assertTrue(record['qualification_observations'])
+        self.assertTrue(record['rollback_requested'])
+
+    def test_status_gap_restarts_continuous_qualification(self):
+        def status(session):
+            if self.camera.selector != self.camera.old and 10 <= self.clock.now < 20:
+                raise RuntimeError('synthetic status gap')
+            return dict(self.status)
+        with patch.object(upgrade, 'safe_status', status):
+            result = self.run_upgrade()
+        rows = result['qualification_observations']
+        self.assertTrue(any(row.get('state') == 'status_unavailable' for row in rows))
+        self.assertGreaterEqual(self.clock.now, 35)
+        self.assertTrue(result['verified'])
+
+    def test_fresh_but_detached_does_not_qualify_an_attached_router(self):
+        self.status['thread_role'] = 'router'
+        def status(session):
+            result = dict(self.status)
+            if self.camera.selector != self.camera.old and self.clock.now < 36:
+                result['thread_role'] = 'detached'
+            return result
+        with patch.object(upgrade, 'safe_status', status):
+            result = self.run_upgrade()
+        rows = result['qualification_observations']
+        attached = [r['elapsed_seconds'] for r in rows if r['status']['thread_role'] == 'router']
+        self.assertGreaterEqual(attached[-1] - attached[0], 15)
+        self.assertTrue(any(r['status']['thread_role'] == 'detached' for r in rows))
+
+    def test_frozen_ready_file_cannot_qualify(self):
+        self.status['monotonic_ms'] = 1000
+        with self.assertRaisesRegex(RuntimeError, 'status stopped advancing'):
+            self.run_upgrade()
+        self.assertIn('rollback', self.camera.events)
+        self.assertNotIn('commit', self.camera.events)
+
+    def test_five_second_status_publication_can_qualify(self):
+        self.status['monotonic_ms'] = 1000
+        def status(session):
+            return dict(self.status, monotonic_ms=1000 + int(self.clock.now // 5) * 5000)
+        with patch.object(upgrade, 'safe_status', status):
+            result = self.run_upgrade()
+        self.assertTrue(result['verified'])
+
     def test_python_selector_rejects_traversal_foreign_paths_uppercase(self):
         valid = "/mnt/sdcard/g2h-matter-camera/releases/" + "a" * 64 + "/camera"
         self.assertEqual(upgrade.selected_path(valid + "\n"), valid)
