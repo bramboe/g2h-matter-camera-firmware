@@ -26,7 +26,7 @@ Home Assistant exposes standard Mode Select controls for audio, full video
 capture and the Thread radio. They are Enabled/Disabled selections, not custom
 switch entities. Video changes require a full camera reboot.
 
-HA 2026.10.2 has no native Matter camera platform in its discovery mapping, so
+HA 2026.10.4 has no native Matter camera platform in its discovery mapping, so
 it does not create a camera entity or a disabled camera placeholder. A firmware
 cannot insert an unsupported-feature banner into HA's UI. The firmware retains
 its Matter camera capabilities; this setup does not provide live video,

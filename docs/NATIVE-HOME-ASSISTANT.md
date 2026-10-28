@@ -9,7 +9,7 @@ configuration is required for the standard controls described here.
 The qualified camera runs the 0.5.3 candidate. The historical public prebuilt is
 not replaced by these instructions; qualify the actual installed build first.
 
-| Function in HA 2026.10.2 | Native-only behavior |
+| Function in HA 2026.10.4 | Native-only behavior |
 | --- | --- |
 | Device identity and pairing | One existing Matter node/device page |
 | Global sound | Standard Mode Select: Camera audio, Disabled/Enabled |
@@ -60,7 +60,7 @@ exposes the three standard clusters.
 
 ## Unsupported-camera indication
 
-HA 2026.10.2's Matter discovery mapping has no camera platform. Unsupported
+HA 2026.10.4's Matter discovery mapping has no camera platform. Unsupported
 camera functionality is omitted; the firmware cannot force HA to create a
 disabled camera entity or an unsupported-feature banner. An optional device
 note or label can explain the missing live view using HA's normal device-edit
@@ -103,3 +103,12 @@ No listening test or test sound was performed. No firmware binary was changed
 for this acceptance trial. HA's native display still requires the cache-refresh
 qualification described above, and a newly commissioned second physical camera
 was not tested. The existing device's pairings and native entity IDs are retained.
+
+The final migration removed the project config entry, its linked device page
+and all 14 project entities after user confirmation. Project files were archived
+outside `custom_components`; the automatic YAML loader is absent. The original
+Matter device and its three enabled native select entities remained. HA's native
+device label explains that Matter live view is not yet supported. No companion
+code remains on the active integration path, and no camera re-pairing was used.
+The installed HA version was verified from `.HA_VERSION` as 2026.10.4; the earlier
+2026.10.2 media/extension evidence in this repository remains historical.

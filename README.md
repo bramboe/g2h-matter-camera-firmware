@@ -68,7 +68,7 @@ export G2H_IP=192.168.1.123   # your camera's IP
   Matter Server. Standard audio, full-video and Thread controls are available
   as Mode Select selections on the existing Matter device; no project custom
   component is required. See [native setup](docs/NATIVE-HOME-ASSISTANT.md).
-  HA 2026.10.2 does not create a native Matter camera entity, so that setup has
+  HA 2026.10.4 does not create a native Matter camera entity, so that setup has
   no HA live view or disabled camera placeholder. The optional project extension
   provides media and extra diagnostics, but adds a linked device page.
 - Hardware constraint: the camera binary may only be swapped **during a full boot**,
