@@ -1,5 +1,7 @@
 # G2H Matter Camera firmware
 
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bramboe?frequency=one-time) [![Donate via bunq.me](https://img.shields.io/badge/Donate-bunq.me-2E9AD0)](https://bunq.me/bramboe)
+
 Custom firmware work for the **Aqara Camera Hub G2H** that turns it into an
 **all‑Matter camera** — video (WebRTC), snapshots, microphone, talkback, camera
 controls and privacy over a single Matter pairing, with the on‑board JN5189 as an
@@ -70,12 +72,6 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
 - Hardware constraint: the camera binary may only be swapped **during a full boot**,
   never by killing the running camera process (the video hardware does not
   re‑initialise reliably otherwise). The tooling here follows that rule.
-
-## Support
-
-If this project is useful to you, consider sponsoring my work 💙
-
-[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bramboe?frequency=one-time) [![Donate via bunq.me](https://img.shields.io/badge/Donate-bunq.me-2E9AD0)](https://bunq.me/bramboe)
 
 ## License
 
