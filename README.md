@@ -71,6 +71,12 @@ export CAMERA_IP=192.168.1.50   # your camera's IP
   never by killing the running camera process (the video hardware does not
   re‑initialise reliably otherwise). The tooling here follows that rule.
 
+## Support
+
+If this project is useful to you, consider sponsoring my work 💙
+
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/bramboe) [![Donate via bunq.me](https://img.shields.io/badge/Donate-bunq.me-2E9AD0)](https://bunq.me/bramboe)
+
 ## License
 
 Our code (the `app/` application, `install/` tooling and `firmware-patch/`
