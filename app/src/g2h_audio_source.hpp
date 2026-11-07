@@ -1,7 +1,7 @@
 #pragma once
 #include "aac_hbr.hpp"
-#include "g2h_rtsp_source.hpp"
-#include "../g2h-media-codecs/audio/g2h_aac_opus.hpp"
+#include "g2h_media_input.hpp"
+#include "g2h_aac_opus.hpp"
 #include <pthread.h>
 #include <atomic>
 #include <deque>
@@ -65,8 +65,8 @@ private:
             // Graceful teardown: drain pending RTP and the TEARDOWN reply before close. A plain
             // close with unread data resets the connection, and every stop of our app after a
             // /13 session restarted the vendor camera process (2026-10-22/23).
-            stage_="connect";Rtsp source("127.0.0.1",std::chrono::milliseconds(3000),true,kAudioPath);
-            stage_="describe-setup-play";const auto track=source.StartAudio();const unsigned payload=track.payload;channel_=track.channel;
+            stage_="connect";MediaInput source(true);
+            stage_="describe-setup-play";source.Start();const auto track=source.AudioTrack();const unsigned payload=track.payload;channel_=track.channel;
             stage_="transcoder";
             static constexpr std::uint8_t kAsc[2]={0x14,0x08}; // AAC-LC, 16 kHz, mono (SDP config=1408)
             g2hmedia::AacToOpus::Error error;

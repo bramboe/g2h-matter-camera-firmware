@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Zig 0.14.1 ARM/musl compiler shim; no host-specific paths."""
+import os, subprocess, sys
+from pathlib import Path
+zig=os.environ.get('ZIG','zig')
+name=Path(sys.argv[0]).name
+mode={'g2h-cc':'cc','g2h-cxx':'c++','g2h-ar':'ar','g2h-ranlib':'ranlib'}[name]
+a=[x for x in sys.argv[1:] if not x.startswith(('--target=','-mcpu='))]
+# FFmpeg probes compiler -v with no input: Zig otherwise waits for stdin.
+if mode in ('cc','c++') and a in (['-v'],['--version']):
+ subprocess.run([zig,'version'],check=True); print('clang version 19 (Zig 0.14.1)');sys.exit(0)
+args=[zig,mode]
+if mode in ('cc','c++'):args+=['-target','arm-linux-musleabihf','-mcpu=cortex_a7']
+os.execvp(zig,args+a)

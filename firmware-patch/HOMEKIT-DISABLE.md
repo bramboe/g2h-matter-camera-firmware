@@ -25,7 +25,7 @@ device. Verified on a live G2H — after the patch an mDNS browse shows **no
 > actually verified to remove the advertisement.
 
 The HAP server process still runs internally (its port stays open), but with no
-`_hap` advertisement it is undiscoverable and unpairable — effectively disabled.
+`_hap` advertisement it is no longer discovered as a HomeKit accessory. The HAP service and existing pairings remain; this patch does not stop the HomeKit stack.
 
 ## The patch
 

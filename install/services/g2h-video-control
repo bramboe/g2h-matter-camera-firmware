@@ -1,0 +1,25 @@
+#!/bin/sh
+# Invoked only for an authenticated Matter request by our app's worker.
+# Both transitions use a clean full boot; never warm-restart native camera.
+base=/customer/g2h-matter-camera
+cfg=/mnt/config/g2h-matter-camera
+[ "$#" = 2 ] && [ "$1" = set ] || exit 2
+case "$2" in 0|1) ;; *) exit 2;; esac
+[ ! -L "$cfg" ] && [ -d "$cfg" ] && [ "$(stat -c %u "$cfg")" = 0 ] || exit 1
+[ ! -L "$cfg/video-profile" ] && [ -f "$cfg/video-profile" ] || exit 1
+[ "$(stat -c %u "$cfg/video-profile")" = 0 ] && [ "$(stat -c %a "$cfg/video-profile")" = 600 ] || exit 1
+read native_md5 helper_md5 < "$cfg/video-profile" || exit 1
+case "$native_md5:$helper_md5" in *[!0-9a-f:]*|:*) exit 1;; esac
+[ "${#native_md5}:${#helper_md5}" = 32:32 ] || exit 1
+[ "$(md5sum /tmp/out/camera | awk '{print $1}')" = "$native_md5" ] || exit 1
+[ "$(md5sum "$base/video-boot-gate.so" | awk '{print $1}')" = "$helper_md5" ] || exit 1
+umask 077
+mkdir /tmp/g2h-video-control-request 2>/dev/null || exit 1
+# An existing pending directory prevents duplicate queued reboots. /tmp clears
+# on the full boot. There is no timer that silently turns privacy back off.
+if ! (set -e; printf '%s\n' "$2" > "$cfg/video-enabled.next"; chmod 600 "$cfg/video-enabled.next"; mv "$cfg/video-enabled.next" "$cfg/video-enabled"; sync); then
+ rmdir /tmp/g2h-video-control-request 2>/dev/null
+ exit 1
+fi
+(trap '' HUP; sleep 3; sync; /sbin/reboot) </dev/null >/dev/null 2>&1 &
+exit 0

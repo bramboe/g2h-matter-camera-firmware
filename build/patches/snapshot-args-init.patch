@@ -1,0 +1,13 @@
+diff --git a/src/app/clusters/camera-av-stream-management-server/CameraAVStreamManagementCluster.cpp b/src/app/clusters/camera-av-stream-management-server/CameraAVStreamManagementCluster.cpp
+index 96f80f4..61cbe12 100644
+--- a/src/app/clusters/camera-av-stream-management-server/CameraAVStreamManagementCluster.cpp
++++ b/src/app/clusters/camera-av-stream-management-server/CameraAVStreamManagementCluster.cpp
+@@ -2355,7 +2355,7 @@ CameraAVStreamManagementCluster::HandleSnapshotStreamAllocate(CommandHandler & h
+         return Status::ConstraintError;
+     }
+ 
+-    CameraAVStreamManagementDelegate::SnapshotStreamAllocateArgs snapshotStreamArgs;
++    CameraAVStreamManagementDelegate::SnapshotStreamAllocateArgs snapshotStreamArgs{};
+     snapshotStreamArgs.imageCodec       = commandData.imageCodec;
+     snapshotStreamArgs.maxFrameRate     = commandData.maxFrameRate;
+     snapshotStreamArgs.minResolution    = commandData.minResolution;

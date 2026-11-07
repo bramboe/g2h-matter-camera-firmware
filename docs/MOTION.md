@@ -1,0 +1,140 @@
+# Native motion through the existing Matter pairing
+
+**Native-only default (0.5.4 candidate):** motion is exposed through standard
+Vision Occupancy Sensing on the existing camera endpoint and native HA Matter
+device. No G2H component is required. See [NATIVE-DIAGNOSTICS.md](NATIVE-DIAGNOSTICS.md)
+for its different unknown-value/cache behavior and attended physical event test.
+The remaining sections describe the optional companion/vendor-cluster path;
+its unavailable-state guarantees do not establish native HA cache behavior.
+
+The unified `g2h_matter_camera` HA extension 0.4.1 adds a normal **Motion** binary
+sensor to the same Matter device as the camera. It uses the existing Matter
+node and fabric. There is no second pairing, MQTT connection, RTSP analysis or
+new image-recognition workload. Existing camera and Thread entity identities
+are retained.
+
+This is the vendor camera's **held-motion signal**, not occupancy or a promise
+of human/pet classification. The observer reads a narrowly verified native
+producer; it does not enable or change that producer. If the native producer is
+disabled, unknown, stale, or fails executable/layout validation, HA reports the
+motion entity as **unavailable**. It never turns those cases into “clear.” A
+fresh, enabled producer reporting false is a real clear sample.
+
+The observer is experimental. Merely installing the HA entity does not prove
+that native motion is being produced on a particular firmware build. Consult
+its `reason`, `producer_enabled` and `freshness_window_ms` attributes;
+`sample_age_ms` is available only in downloaded diagnostics. Reasons such as `native-producer-disabled`, `stale`,
+`executable-layout-mismatch`, `executable-hash-mismatch`, `hash-timeout` or
+`memory-read-failed` describe unavailable observations. No hash, process memory,
+network key or private media is exported to HA.
+
+## Interface
+
+Vendor cluster `0xFFF1FC12`, endpoint 0, revision 1:
+
+| ID | Meaning |
+|---|---|
+| 0 | Fresh known held-motion sample (boolean) |
+| 1 | Held motion (nullable boolean) |
+| 2 | Native producer enabled (nullable boolean) |
+| 3 | Bounded static status reason |
+| 4 | Source label: `vendor-vision-held-motion` |
+| 5 | Sample age in milliseconds (nullable uint32) |
+| 6 | Freshness window in milliseconds (4000 in the new source candidate; older images advertise 2000) |
+
+HA polls explicit attributes 0/1/2/3/5/6 every half second (the native observer samples once per second).
+The coordinator uses a precise relative monotonic timer because HA 2026.10
+rounds the normal coordinator schedule to whole seconds. It keeps one pending
+poll, normally waits at least 500 ms after a completed read, honors disabled polling and
+longer retry delays, and cancels its timer/read task on unload. It does not
+catch up overdue polls in a burst. A local monotonic
+expiry also marks the entity unavailable when sample age exceeds the stated
+window, even if the following server request is slow or disconnected. HA
+conservatively counts the complete request/response duration as additional sample
+age; receiving a slow response does not renew the sample lease. Scheduled
+expiry and coordinator polling are stopped when the extension unloads; the
+shared official HA Matter client is never closed by this extension.
+
+Local waits are bounded to two seconds. The coordinator keeps one underlying
+remote read, bounded to thirty seconds, across local wait timeouts. Cancelling a
+local HA future does not cancel the server operation; retaining that operation
+prevents subsequent polls from adding more requests behind it. A late response
+is aged from the original request start and cannot renew an expired sample.
+Unload cancels the retained task. This queue-prevention change has regression
+coverage and is active in HA. The follow-up report records both successful
+reads and remaining genuine expiry events during runtime checks.
+
+A single transport timeout or OS transport error may retain the last sample
+only while its original lease is still valid. This does not refresh its sample
+time or move the expiry timer. One prompt 50-ms retry follows that retained
+failure; normal polling stays at 500 ms, no concurrent request is added, and
+explicit longer retry delays take priority. Invalid/unsupported responses fail
+closed immediately. A longer interruption still expires the sample normally.
+
+The device reports state/producer/reason changes through Matter. Merely
+refreshing the sample timestamp does not dirty the age attribute or advance the
+cluster data version. Age is still encoded freshly on an explicit diagnostic
+read, and stale/failed producer transitions still report unavailable.
+
+Polling refreshes private timing information without publishing it as entity
+attributes. HA is notified only when meaningful motion/producer/status values
+change. An actual expiry publishes unavailable once; a fresh sample recovers
+once even when its motion boolean is the same as before the expiry.
+
+An unsupported motion cluster on older device software leaves this entity
+unavailable while the existing camera and Thread sensors continue loading.
+The component does not change HA's Matter subscription or the controller's
+cached device-availability flag.
+
+## Offline validation
+
+```sh
+python3 tests/test_camera_diagnostics.py
+python3 tests/test_camera_platforms.py
+python3 tests/test_camera_unload.py
+python3 tests/test_camera_config_flow.py
+python3 tests/test_motion_precise_schedule.py
+```
+
+The fixtures verify false versus null, disabled/stale/malformed samples,
+independent optional Thread failures, preserved existing device/entity IDs,
+server disconnects, bounded optional reads, local expiry and clean unload.
+Hardware motion-event accuracy and uninterrupted live-video behavior require
+separate runtime verification; these fixtures are not such a verification.
+
+The historical `producer_enabled` field is the native HomeKit motion-reporting
+permission (camera active and not manually disabled). It does not, by itself,
+prove that the YUV detector is running or that a detection region is configured.
+A fresh clear sample is the native held flag; qualification must include an
+actual detected-to-clear transition. No native detector setting is changed.
+
+`tests/test_motion_reporting.cpp` also checks the real SDK cluster data version:
+steady motion with changing ages emits no change, while detection, expiry,
+recovery and a disabled producer each advance the version. Compile it against
+the production SDK with assertions enabled (`-UNDEBUG`). The ARM test was run
+on the camera without reading native process memory or altering camera state.
+
+The earlier two-second image showed an expiry during a 1.19-second read, with
+no native stale samples or read errors in the measured interval. The new source
+candidate advertises four seconds: one-second producer cadence, a two-second
+read deadline and scheduling margin. This changes the explicit lease; it does
+not keep a value available past that lease. The four-second app has passed guarded installation and full-boot checks.
+The broker and earlier HA transient-error logic passed a five-minute media sample; one longer
+control-path interruption still correctly expired a sample. This is not a claim
+of uninterrupted control-path availability. Downloaded diagnostics contain bounded timing counters (read
+latency, expiry during a read, native stale samples and errors), never raw frames,
+process memory or credentials. See [the follow-up report](TEST-REPORT-2026-10-25.md).
+
+## Late responses and optional Thread reads
+
+An already-expired response is normalized directly to unavailable; it does not
+publish a transient valid reason followed by another expiry. Listener delivery
+compares the actual visible motion/availability/producer/reason state, including
+expiry delivered while a remote read was pending. Unchanged states do not
+produce another notification; expiry and fresh recovery still do.
+
+The Thread coordinator also retains one underlying remote read across local
+timeouts. A slow optional table cannot queue further tables or a new core read
+behind it. A later update discards its stale reply before requesting fresh core
+data. These protections limit queued work; they do not eliminate real network
+or control-path interruptions.

@@ -1,0 +1,6 @@
+import("//build_overrides/chip.gni")
+import("${chip_root}/src/app/chip_data_model.gni")
+chip_data_model("model") {
+  zap_file = "g2h-camera.zap"
+  is_server = true
+}

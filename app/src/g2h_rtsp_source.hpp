@@ -66,7 +66,7 @@ class Rtsp {
     }
 public:
     g2h::H264Parameters parameters;
-    explicit Rtsp(const char*host,std::chrono::milliseconds budget=std::chrono::milliseconds(9000),bool gracefulTeardown=false,const char *path=g2h::kVideoPath):uri_(std::string("rtsp://")+host+":554"+path),gracefulTeardown_(gracefulTeardown){
+    explicit Rtsp(const char*host,std::chrono::milliseconds budget=std::chrono::milliseconds(9000),bool gracefulTeardown=false,const char *path=g2h::kVideoPath,std::uint16_t port=554):uri_(std::string("rtsp://")+host+":"+std::to_string(port)+path),gracefulTeardown_(gracefulTeardown){
         if(budget.count()<50||budget.count()>9000)throw std::invalid_argument("RTSP budget");
         deadline_=Clock::now()+budget;
         fd_=socket(AF_INET,SOCK_STREAM,0);if(fd_<0)throw std::runtime_error("socket");
@@ -74,7 +74,7 @@ public:
 #ifdef SO_NOSIGPIPE
         int one=1;setsockopt(fd_,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof one);
 #endif
-        sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(554);inet_pton(AF_INET,host,&a.sin_addr);
+        sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port);inet_pton(AF_INET,host,&a.sin_addr);
         try{
             if(connect(fd_,reinterpret_cast<sockaddr*>(&a),sizeof a)<0&&errno!=EINPROGRESS)throw std::runtime_error("connect");
             Wait(POLLOUT);int error=0;socklen_t size=sizeof error;if(getsockopt(fd_,SOL_SOCKET,SO_ERROR,&error,&size)||error)throw std::runtime_error("connect failed");
@@ -104,6 +104,7 @@ public:
             }
         }
         close(fd_);fd_=-1;}}
+    int Descriptor()const{return fd_;}
     void RenewReadDeadline(){deadline_=Clock::now()+std::chrono::seconds(2);}
     void Read(void *data,std::size_t count){
         auto*p=static_cast<std::uint8_t*>(data);

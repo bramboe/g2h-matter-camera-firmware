@@ -1,0 +1,106 @@
+#!/bin/sh
+# Own app only. Keeps identity/state and the independent native media broker.
+cfg=/mnt/config/g2h-matter-camera
+default=/customer/g2h-matter-camera/camera
+pidfile=/tmp/g2h-matter-camera.pid
+state=/tmp/g2h-matter-camera-state
+update=$cfg/update-pending
+valid_path() {
+    case "$1" in
+    /customer/g2h-matter-camera/camera) return 0;;
+    /customer/g2h-matter-camera/releases/*/camera) hash=${1#/customer/g2h-matter-camera/releases/};;
+    /mnt/sdcard/g2h-matter-camera/releases/*/camera) hash=${1#/mnt/sdcard/g2h-matter-camera/releases/};;
+    *) return 1;;
+    esac
+    hash=${hash%/camera}
+    [ "${#hash}" = 64 ] || return 1
+    case "$hash" in *[!0-9a-f]*) return 1;; esac
+    return 0
+}
+select_app() {
+    app=$default
+    if [ -r "$cfg/app-path" ]; then read app < "$cfg/app-path"; fi
+    valid_path "$app" || return 1
+    [ "$(readlink -f "$app")" = "$app" ] || return 1
+    [ -x "$app" ] || return 1
+}
+running() {
+    [ -r "$pidfile" ] || return 1
+    read pid birth < "$pidfile"
+    case "$pid" in ''|*[!0-9]*) return 1;; esac
+    exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
+    valid_path "$exe" || return 1
+    [ -z "$birth" ] || [ "$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)" = "$birth" ]
+}
+stop_app() {
+    if running; then
+        kill -TERM "$pid" || return 1
+        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do running || break; sleep 1; done
+        running && return 1
+    fi
+    rm -f "$pidfile" /tmp/g2h-matter-camera-status.json /tmp/g2h-matter-camera-status.tmp
+}
+rollback_pointer() {
+    [ -r "$update/previous" ] || return 1
+    read previous < "$update/previous"
+    valid_path "$previous" && [ -x "$previous" ] || return 1
+    printf '%s\n' "$previous" > "$cfg/app-path.restore" || return 1
+    mv "$cfg/app-path.restore" "$cfg/app-path" || return 1
+    read previous_broker < "$update/previous-broker"
+    if [ "$previous_broker" = 1 ]; then : > "$cfg/media-broker-enabled" || return 1; else rm -f "$cfg/media-broker-enabled"; fi
+    sync
+    rolledback=$cfg/update-rolled-back-$(cat /proc/sys/kernel/random/uuid)
+    [ ! -e "$rolledback" ] || return 1
+    mv "$update" "$rolledback" || return 1
+    sync
+}
+case "$1" in
+stop) stop_app; exit $?;;
+disable) rm -f "$cfg/enabled"; stop_app; exit $?;;
+commission) running && kill -USR1 "$pid"; exit $?;;
+status) if running && [ -r /tmp/g2h-matter-camera-status.json ]; then cat /tmp/g2h-matter-camera-status.json; exit 0; fi; echo Stopped; exit 1;;
+rollback)
+    [ -d "$update" ] || exit 1
+    mkdir "$update/action.lock" 2>/dev/null || exit 1
+    read previous_broker < "$update/previous-broker"
+    if ! stop_app; then rmdir "$update/action.lock"; exit 1; fi
+    rollback_pointer || { rmdir "$update/action.lock" 2>/dev/null; exit 1; }
+    # Legacy direct RTSP clients must not coexist with a broker whose sessions
+    # were opened by the rejected candidate. A full boot also clears hardware.
+    if [ "$previous_broker" = 0 ]; then sync; reboot; exit $?; fi
+    exec "$0" start;;
+''|start) ;;
+*) echo 'Use start, stop, status, commission, rollback or disable'; exit 2;;
+esac
+[ -f "$cfg/enabled" ] || exit 0
+# Interrupted updates roll back before boot starts the app. The timed guardian
+# handles a disconnected installer without depending on that installer's Mac.
+if [ -d "$update" ]; then
+    read transaction_boot < "$update/boot"
+    boot=$(cat /proc/sys/kernel/random/boot_id)
+    [ "$transaction_boot" = "$boot" ] || rollback_pointer || exit 1
+fi
+select_app || exit 1
+[ -f "$cfg/identity" ] && [ -d "$cfg/state" ] || exit 1
+mkdir /tmp/g2h-matter-camera-start.lock 2>/dev/null || exit 1
+trap 'rmdir /tmp/g2h-matter-camera-start.lock 2>/dev/null' EXIT
+running && exit 0
+if [ -e "$state" ] || [ -L "$state" ]; then
+    [ "$(readlink "$state")" = "$cfg/state" ] || exit 1
+else
+    ln -s "$cfg/state" "$state" || exit 1
+fi
+if [ -f "$cfg/media-broker-enabled" ]; then
+    /etc/init.d/S95g2hmediabroker start || exit 1
+    /etc/init.d/S95g2hmediabroker status || exit 1
+    export G2H_MEDIA_BROKER_DIR=/tmp/g2h-media-broker
+fi
+umask 077
+(
+    trap '' HUP
+    exec "$app" --serve </dev/null >/dev/null 2>&1
+) &
+pid=$!
+birth=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)
+printf '%s %s\n' "$pid" "$birth" > "$pidfile"
+exit 0

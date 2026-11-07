@@ -5,13 +5,14 @@ reboots again. Adds only our Matter service; vendor files are not touched.
 Usage: python3 g2h_place_appbin_live.py /path/to/app.bin [--reboot]
 Without --reboot it only stages the file and reports; you reboot yourself.
 """
-import getpass,hashlib,shlex,sys,time
+import getpass,hashlib,shlex,sys,time,os
 from pathlib import Path
 HERE=Path(__file__).resolve().parent;sys.path.insert(0,str(HERE))
 from g2h_identification_probe import Telnet
 from g2h_upload_telnet_bulk import upload
 
-HOST='192.168.1.50';q=shlex.quote
+HOST=os.environ.get('G2H_IP') or os.environ.get('CAMERA_IP');q=shlex.quote
+if not HOST:raise SystemExit('Set G2H_IP to the camera address; no default device is selected.')
 if len(sys.argv)<2:
     print('usage: g2h_place_appbin_live.py /path/to/app.bin [--reboot]');raise SystemExit(2)
 app=Path(sys.argv[1]);reboot='--reboot' in sys.argv[2:];remove='--remove' in sys.argv[1:]
